@@ -569,6 +569,23 @@ export default function WorkerDashboardPage() {
         {error && <p className="mt-2 text-sm font-medium text-red-600">{error}</p>}
       </div>
 
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        {anomalies.length > 0 ? (
+          <div className="flex items-start gap-3">
+            <span className="relative mt-1 flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-600" />
+            </span>
+            <div>
+              <p className="text-sm font-bold text-red-700">Anomaly Alerts Active</p>
+              <p className="text-xs text-red-600">{anomalies.length} suspicious pattern{anomalies.length > 1 ? 's' : ''} detected in your latest shifts.</p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600">No anomaly alerts right now.</p>
+        )}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-slate-500">Net Earnings</p>
@@ -618,22 +635,6 @@ export default function WorkerDashboardPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:col-span-4">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Income Distribution By Platform</h3>
-            <select
-              value={distributionWindow}
-              onChange={(e) => setDistributionWindow(e.target.value as DistributionWindow)}
-              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
-            >
-              <option value="day">Today</option>
-              <option value="month">This Month</option>
-              <option value="year">This Year</option>
-            </select>
-          </div>
-          <ReactECharts option={platformDonutOption} style={{ height: 300, width: '100%' }} />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:col-span-6">
-          <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Effective Hourly Rate Over Time</h3>
             <select
               value={hourlyGranularity}
@@ -646,12 +647,28 @@ export default function WorkerDashboardPage() {
               <option value="yearly">Yearly</option>
             </select>
           </div>
-          <ReactECharts option={hourlyOption} style={{ height: 280, width: '100%' }} />
+          <ReactECharts option={hourlyOption} style={{ height: 300, width: '100%' }} />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:col-span-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:col-span-12">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Income Distribution By Platform</h3>
+            <select
+              value={distributionWindow}
+              onChange={(e) => setDistributionWindow(e.target.value as DistributionWindow)}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+            >
+              <option value="day">Today</option>
+              <option value="month">This Month</option>
+              <option value="year">This Year</option>
+            </select>
+          </div>
+          <ReactECharts option={platformDonutOption} style={{ height: 280, width: '100%' }} />
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:col-span-8">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Platform Commission Rate Tracker</h3>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Platform Deductions Tracker</h3>
             <div className="flex gap-2">
               <select
                 value={commissionGranularity}
