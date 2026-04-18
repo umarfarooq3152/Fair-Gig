@@ -164,6 +164,8 @@ export default function ShiftsPage() {
   const [platformFilter, setPlatformFilter] = useState('all');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [csvRows, setCsvRows] = useState<CsvPreviewRow[]>([]);
@@ -172,6 +174,7 @@ export default function ShiftsPage() {
   const [csvMessage, setCsvMessage] = useState('');
 
   const [showModal, setShowModal] = useState(false);
+  const [screenshotPreviewUrl, setScreenshotPreviewUrl] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ShiftForm>({
     platform: '',
@@ -242,6 +245,10 @@ export default function ShiftsPage() {
     setShowCsvModal(false);
     setCsvUploading(false);
     setCsvMessage('');
+  };
+
+  const closeScreenshotPreview = () => {
+    setScreenshotPreviewUrl('');
   };
 
   const grossNum = Number(form.gross_earned || 0);
@@ -551,6 +558,28 @@ export default function ShiftsPage() {
     });
   }, [fromDate, platformFilter, search, shifts, statusFilter, toDate]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredShifts.length / pageSize));
+  const paginatedShifts = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredShifts.slice(start, start + pageSize);
+  }, [filteredShifts, page]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, platformFilter, fromDate, toDate]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  if (loading && !shifts.length) {
+    return (
+      <div className="fixed inset-0 z-[210] flex items-center justify-center bg-white/35 backdrop-blur-sm">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -616,7 +645,7 @@ export default function ShiftsPage() {
             </tr>
           </thead>
           <tbody>
-            {filteredShifts.map((s) => (
+            {paginatedShifts.map((s) => (
               <tr key={s.id} className="border-b">
                 <td className="py-2">{s.platform}</td>
                 <td>{formatDateOnly(s.shift_date)}</td>
@@ -631,14 +660,13 @@ export default function ShiftsPage() {
                 </td>
                 <td>
                   {s.screenshot_url ? (
-                    <a
-                      href={normalizeScreenshotUrl(s.screenshot_url)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setScreenshotPreviewUrl(normalizeScreenshotUrl(s.screenshot_url))}
                       className="inline-flex rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       View
-                    </a>
+                    </button>
                   ) : (
                     <span className="text-xs text-slate-400">Not attached</span>
                   )}
@@ -675,6 +703,32 @@ export default function ShiftsPage() {
             ) : null}
           </tbody>
         </table>
+        {filteredShifts.length > 0 ? (
+          <div className="flex items-center justify-between border-t border-slate-200 px-2 py-3 text-sm">
+            <p className="text-slate-500">
+              Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredShifts.length)} of {filteredShifts.length}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-semibold text-slate-600">Page {page} / {totalPages}</span>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {showModal && mounted
@@ -817,6 +871,34 @@ export default function ShiftsPage() {
                     {csvUploading ? 'Uploading...' : 'Upload All Selected With Pictures'}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
+
+      {screenshotPreviewUrl && mounted
+        ? createPortal(
+          <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
+              <div className="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
+                <h2 className="text-lg font-bold">Screenshot Proof</h2>
+                <button
+                  type="button"
+                  onClick={closeScreenshotPreview}
+                  className="rounded border border-slate-200/40 px-2 py-1 text-sm text-white hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="max-h-[80vh] overflow-auto bg-slate-100 p-4">
+                <img
+                  src={screenshotPreviewUrl}
+                  alt="Shift screenshot proof"
+                  className="mx-auto max-h-[72vh] w-auto rounded-lg border border-slate-200 bg-white object-contain"
+                />
               </div>
             </div>
           </div>,

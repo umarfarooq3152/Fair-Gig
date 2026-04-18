@@ -648,16 +648,15 @@ export default function WorkerDashboardPage() {
     };
   }, [distributionShifts]);
 
-  if (!isMounted) {
-    return <div className="p-8 text-center text-slate-500 font-medium animate-pulse">Loading dashboard...</div>;
-  }
-
-  if (loading && !shifts.length) {
-    return <div className="p-8 text-center text-slate-500 font-medium animate-pulse">Loading amazing things...</div>;
-  }
+  const showInitialLoader = !isMounted || (loading && !shifts.length);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(1200px_500px_at_20%_-10%,rgba(14,165,233,0.10),transparent),radial-gradient(1000px_450px_at_90%_0%,rgba(16,185,129,0.12),transparent),#f8fafc] p-4 sm:p-6">
+      {showInitialLoader ? (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-white/35 backdrop-blur-sm">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+        </div>
+      ) : null}
       <div className="mx-auto grid max-w-[1400px] grid-cols-12 gap-4 sm:gap-5">
         {error && (
           <div className="col-span-12 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
