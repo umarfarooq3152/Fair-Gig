@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, FormEvent } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, LineChart, Line, Cell
+  BarChart, Bar, LineChart, Line,
 } from 'recharts';
 import {
   LayoutDashboard,
@@ -14,35 +14,24 @@ import {
   AlertTriangle,
   FileText,
   CheckCircle2,
-  ExternalLink,
   ChevronRight,
   Plus,
-  ArrowUpRight,
-  TrendingDown,
   User,
-  LogOut
+  LogOut,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types ---
 type UserRole = 'worker' | 'verifier' | 'advocate';
-// (Type definitions follow...)
+
+type AuthUser = {
   id: string;
-  worker_id?: string;
-  worker_name?: string;
-  verifier_id?: string | null;
-  verifier_note?: string | null;
-  screenshot_url?: string | null;
-  deduction_rate?: number;
-  created_at?: string;
-  platform: string;
-  shift_date: string;
-  hours_worked: number;
-  gross_earned: number;
-  platform_deductions: number;
-  net_received: number;
-  notes?: string | null;
-  verification_status: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  city_zone?: string;
+  category?: string;
+  phone?: string;
 };
 
 type Shift = {
@@ -132,8 +121,25 @@ type ComplaintItem = {
   created_at?: string;
 };
 
+type ComplaintCluster = {
+  id: string;
+  name: string;
+  platform?: string | null;
+  primary_tag?: string | null;
+  complaint_count?: number;
+};
+
+type ComplaintSpike = {
+  platform: string;
+  category: string;
+  count: number;
+  first_seen_at?: string;
+  latest_seen_at?: string;
+};
+
 type AppSection = 'earnings' | 'community' | 'advocate' | 'verifier';
 
+// --- Constants ---
 const roles: UserRole[] = ['worker', 'verifier', 'advocate'];
 const zones = ['Gulberg', 'DHA', 'Saddar', 'Johar Town', 'Cantt', 'Other'];
 const categories = ['ride_hailing', 'food_delivery', 'freelance', 'domestic'];
@@ -151,19 +157,53 @@ const csvRequiredColumns = [
   'notes',
 ];
 
-const env = (import.meta as any).env || {};
-const authBases = env.VITE_AUTH_BASE_URL ? [env.VITE_AUTH_BASE_URL] : ['/api/auth', 'http://localhost:8001/auth'];
-const earningsBases = env.VITE_EARNINGS_BASE_URL ? [env.VITE_EARNINGS_BASE_URL] : ['/api/shifts', 'http://localhost:8002/shifts'];
-const verifierBases = env.VITE_VERIFIER_BASE_URL ? [env.VITE_VERIFIER_BASE_URL] : ['/api/verifier', 'http://localhost:8002/verifier'];
-const grievanceBases = env.VITE_GRIEVANCE_BASE_URL ? [env.VITE_GRIEVANCE_BASE_URL] : ['http://localhost:8004/api', '/api'];
+// --- Mock / placeholder chart data ---
+const EARNINGS_TREND = [
+  { name: 'W1', value: 18000 },
+  { name: 'W2', value: 22000 },
+  { name: 'W3', value: 19500 },
+  { name: 'W4', value: 25900 },
+];
 
-function joinBase(base: string, endpoint: string) {
+const distributionData = [
+  { zone: 'Gulberg', '<20k': 12, '20k-40k': 34, '40k-60k': 20, '60k+': 8 },
+  { zone: 'DHA', '<20k': 8, '20k-40k': 28, '40k-60k': 35, '60k+': 15 },
+  { zone: 'Saddar', '<20k': 20, '20k-40k': 30, '40k-60k': 10, '60k+': 4 },
+  { zone: 'Johar Town', '<20k': 15, '20k-40k': 25, '40k-60k': 18, '60k+': 6 },
+  { zone: 'Cantt', '<20k': 10, '20k-40k': 22, '40k-60k': 28, '60k+': 12 },
+];
+
+const trendsData = [
+  { month: 'Nov', avg_rate: 0.22 },
+  { month: 'Dec', avg_rate: 0.24 },
+  { month: 'Jan', avg_rate: 0.21 },
+  { month: 'Feb', avg_rate: 0.27 },
+  { month: 'Mar', avg_rate: 0.25 },
+  { month: 'Apr', avg_rate: 0.23 },
+];
+
+// --- API helpers ---
+const env = (import.meta as any).env || {};
+const authBases: string[] = env.VITE_AUTH_BASE_URL
+  ? [env.VITE_AUTH_BASE_URL]
+  : ['/api/auth', 'http://localhost:8001/auth'];
+const earningsBases: string[] = env.VITE_EARNINGS_BASE_URL
+  ? [env.VITE_EARNINGS_BASE_URL]
+  : ['/api/shifts', 'http://localhost:8002/shifts'];
+const verifierBases: string[] = env.VITE_VERIFIER_BASE_URL
+  ? [env.VITE_VERIFIER_BASE_URL]
+  : ['/api/verifier', 'http://localhost:8002/verifier'];
+const grievanceBases: string[] = env.VITE_GRIEVANCE_BASE_URL
+  ? [env.VITE_GRIEVANCE_BASE_URL]
+  : ['http://localhost:8004/api', '/api'];
+
+function joinBase(base: string, endpoint: string): string {
   const normalizedBase = base.replace(/\/+$/, '');
   const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   return `${normalizedBase}${normalizedEndpoint}`;
 }
 
-async function parseJsonSafe(response: Response) {
+async function parseJsonSafe(response: Response): Promise<any> {
   const text = await response.text();
   if (!text) return {};
   try {
@@ -185,7 +225,6 @@ async function fetchWithFallback(
       const response = await fetch(joinBase(base, endpoint), options);
       const payload = await parseJsonSafe(response);
 
-      // If mounted proxy path is wrong in current runtime, try direct service URL fallback.
       if (response.status === 404 && bases.length > 1) {
         continue;
       }
@@ -199,22 +238,22 @@ async function fetchWithFallback(
   throw lastError || new Error('All API endpoints failed');
 }
 
-function getErrorMessage(payload: any, fallback: string) {
+function getErrorMessage(payload: any, fallback: string): string {
   return payload?.detail || payload?.message || fallback;
 }
 
-function getUnknownErrorMessage(error: unknown, fallback: string) {
+function getUnknownErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
   }
   return fallback;
 }
 
-function isCsvRowReady(row: CsvDraftRow) {
+function isCsvRowReady(row: CsvDraftRow): boolean {
   return row.errors.length === 0 && !!row.screenshotFile;
 }
 
-function splitCsvLine(line: string) {
+function splitCsvLine(line: string): string[] {
   const cells: string[] = [];
   let current = '';
   let inQuotes = false;
@@ -244,13 +283,12 @@ function splitCsvLine(line: string) {
   return cells.map((c) => c.replace(/^"|"$/g, '').trim());
 }
 
-function normalizeCsvDate(input: string) {
+function normalizeCsvDate(input: string): { value: string; error?: string } {
   const value = (input || '').trim();
   if (!value) {
     return { value: '', error: 'shift_date is required' };
   }
 
-  // Already in ISO format.
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return { value };
   }
@@ -259,7 +297,6 @@ function normalizeCsvDate(input: string) {
   const parts = compact.split('/').map((p) => p.trim());
 
   if (parts.length === 3) {
-    // YYYY/MM/DD
     if (/^\d{4}$/.test(parts[0])) {
       const y = Number(parts[0]);
       const m = Number(parts[1]);
@@ -271,7 +308,6 @@ function normalizeCsvDate(input: string) {
       }
     }
 
-    // DD/MM/YYYY or MM/DD/YYYY heuristics.
     if (/^\d{4}$/.test(parts[2])) {
       const a = Number(parts[0]);
       const b = Number(parts[1]);
@@ -280,16 +316,13 @@ function normalizeCsvDate(input: string) {
       let d = a;
       let m = b;
 
-      // If first token cannot be month, assume DD/MM.
       if (a > 12 && b <= 12) {
         d = a;
         m = b;
       } else if (b > 12 && a <= 12) {
-        // If second token cannot be month, assume MM/DD.
         m = a;
         d = b;
       } else {
-        // Ambiguous: default to DD/MM.
         d = a;
         m = b;
       }
@@ -305,80 +338,774 @@ function normalizeCsvDate(input: string) {
   return { value: '', error: `shift_date must be YYYY-MM-DD (received: ${value})` };
 }
 
+// --- Main Component ---
 export default function App() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [token, setToken] = useState(localStorage.getItem('fairgig_token'));
-  const [userId, setUserId] = useState(localStorage.getItem('fairgig_user_id'));
+  const [token, setToken] = useState<string | null>(localStorage.getItem('fairgig_token'));
+  const [userId, setUserId] = useState<string | null>(localStorage.getItem('fairgig_user_id'));
   const [user, setUser] = useState<AuthUser | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('fairgig_token'));
-  const [anomaly, setAnomaly] = useState<any>(null);
-  const [median, setMedian] = useState<number>(260);
-  const [distributionData, setDistributionData] = useState<any[]>([]);
-  const [trendsData, setTrendsData] = useState<any[]>([]);
-  const [vulnerabilityData, setVulnerabilityData] = useState<any[]>([]);
-  const [topComplaintsData, setTopComplaintsData] = useState<any[]>([]);
+  const [verifierQueue, setVerifierQueue] = useState<VerifierQueueItem[]>([]);
+  const [myReviewedShifts, setMyReviewedShifts] = useState<Shift[]>([]);
+  const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
+  const [decisionLoadingId, setDecisionLoadingId] = useState<string | null>(null);
+  const [decisionError, setDecisionError] = useState('');
+  const [decisionSuccess, setDecisionSuccess] = useState('');
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [earningsError, setEarningsError] = useState('');
+  const [earningsSuccess, setEarningsSuccess] = useState('');
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
+  const [entryMode, setEntryMode] = useState<'manual' | 'csv'>('manual');
+  const [csvFileName, setCsvFileName] = useState('');
+  const [csvRows, setCsvRows] = useState<CsvDraftRow[]>([]);
+  const [csvError, setCsvError] = useState('');
+  const [csvBusy, setCsvBusy] = useState(false);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<ShiftForm | null>(null);
+  const [previewScreenshotUrl, setPreviewScreenshotUrl] = useState<string | null>(null);
+  const [verifierPlatformFilter, setVerifierPlatformFilter] = useState<string>('all');
+  const [verifierWorkerFilter, setVerifierWorkerFilter] = useState('');
+  const [verifierSortOrder, setVerifierSortOrder] = useState<'newest' | 'oldest'>('oldest');
+  const [activeSection, setActiveSection] = useState<AppSection>('earnings');
+  const [communityItems, setCommunityItems] = useState<ComplaintItem[]>([]);
+  const [advocateItems, setAdvocateItems] = useState<ComplaintItem[]>([]);
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [communityError, setCommunityError] = useState('');
+  const [communitySuccess, setCommunitySuccess] = useState('');
+  const [communityFilterPlatform, setCommunityFilterPlatform] = useState('all');
+  const [communityFilterCategory, setCommunityFilterCategory] = useState('all');
+  const [selectedAdvocateIds, setSelectedAdvocateIds] = useState<string[]>([]);
+  const [clusterName, setClusterName] = useState('Systemic Issue Cluster');
+  const [clusterTag, setClusterTag] = useState('payment_delay');
+  const [bulkTagsInput, setBulkTagsInput] = useState('');
+  const [existingClusterId, setExistingClusterId] = useState('');
+  const [advocateActionBusy, setAdvocateActionBusy] = useState(false);
+  const [complaintClusters, setComplaintClusters] = useState<ComplaintCluster[]>([]);
+  const [complaintSpikes, setComplaintSpikes] = useState<ComplaintSpike[]>([]);
+  const [showCreateComplaintModal, setShowCreateComplaintModal] = useState(false);
+  const [showMyComplaintsModal, setShowMyComplaintsModal] = useState(false);
+  const [myComplaints, setMyComplaints] = useState<ComplaintItem[]>([]);
+  const [myComplaintsLoading, setMyComplaintsLoading] = useState(false);
+  const [myComplaintsError, setMyComplaintsError] = useState('');
+  const [communityForm, setCommunityForm] = useState({
+    platform: 'Careem',
+    category: 'other',
+    description: '',
+    is_anonymous: true,
+  });
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [registerForm, setRegisterForm] = useState<RegisterForm>({
+    name: '',
+    email: '',
+    password: '',
+    role: 'worker',
+    city_zone: 'DHA',
+    category: 'ride_hailing',
+    phone: '',
+  });
+  const [shiftForm, setShiftForm] = useState<ShiftForm>({
+    platform: 'Careem',
+    shift_date: new Date().toISOString().slice(0, 10),
+    hours_worked: '8',
+    gross_earned: '2400',
+    platform_deductions: '600',
+    notes: '',
+  });
 
-  // Auto-login for demo if no token
-  useEffect(() => {
-    if (!token) {
-      handleLogin('worker1@fairgig.demo', 'password123');
-    } else {
-      fetchInitialData();
+  // --- Derived / memoized values ---
+  const netPreview = useMemo(() => {
+    const gross = Number(shiftForm.gross_earned);
+    const deductions = Number(shiftForm.platform_deductions);
+    if (Number.isNaN(gross) || Number.isNaN(deductions)) return 0;
+    return Math.max(0, gross - deductions);
+  }, [shiftForm.gross_earned, shiftForm.platform_deductions]);
+
+  const filteredPendingQueue = useMemo(() => {
+    const workerNeedle = verifierWorkerFilter.trim().toLowerCase();
+    const filtered = verifierQueue.filter((item) => {
+      const matchesPlatform = verifierPlatformFilter === 'all' || item.platform === verifierPlatformFilter;
+      const matchesWorker = !workerNeedle || item.worker_name.toLowerCase().includes(workerNeedle);
+      return matchesPlatform && matchesWorker;
+    });
+
+    filtered.sort((a, b) => {
+      const left = new Date(a.submitted_at || a.shift_date).getTime();
+      const right = new Date(b.submitted_at || b.shift_date).getTime();
+      return verifierSortOrder === 'newest' ? right - left : left - right;
+    });
+
+    return filtered;
+  }, [verifierPlatformFilter, verifierQueue, verifierSortOrder, verifierWorkerFilter]);
+
+  const pendingPlatformOptions = useMemo(() => {
+    return Array.from(new Set(verifierQueue.map((item) => item.platform))).sort((a, b) =>
+      a.localeCompare(b),
+    );
+  }, [verifierQueue]);
+
+  const pendingByWorker = useMemo(() => {
+    const grouped: Record<string, VerifierQueueItem[]> = {};
+    for (const item of filteredPendingQueue) {
+      const key = `${item.worker_name} (${item.worker_id.slice(0, 8)})`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(item);
     }
-  }, [token]);
+    return grouped;
+  }, [filteredPendingQueue]);
 
-  const handleLogin = async (email: string, pass: string) => {
+  const myReviewedByWorker = useMemo(() => {
+    const grouped: Record<string, Shift[]> = {};
+    for (const item of myReviewedShifts) {
+      const name = item.worker_name || 'Unknown Worker';
+      const idPart = item.worker_id ? item.worker_id.slice(0, 8) : 'unknown';
+      const key = `${name} (${idPart})`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(item);
+    }
+    return grouped;
+  }, [myReviewedShifts]);
+
+  const selectedAdvocateItems = useMemo(
+    () => advocateItems.filter((item) => selectedAdvocateIds.includes(item.id)),
+    [advocateItems, selectedAdvocateIds],
+  );
+
+  const selectedClusterId = useMemo(() => {
+    const clusterIds = Array.from(
+      new Set(selectedAdvocateItems.map((item) => item.cluster_id).filter(Boolean)),
+    ) as string[];
+    return clusterIds.length === 1 ? clusterIds[0] : '';
+  }, [selectedAdvocateItems]);
+
+  // Derived earnings stats
+  const totalNet = useMemo(
+    () => shifts.reduce((sum, s) => sum + Number(s.net_received), 0),
+    [shifts],
+  );
+  const totalHours = useMemo(
+    () => shifts.reduce((sum, s) => sum + Number(s.hours_worked), 0),
+    [shifts],
+  );
+  const avgHourlyRate = useMemo(
+    () => (totalHours > 0 ? totalNet / totalHours : 0),
+    [totalNet, totalHours],
+  );
+  const verifiedCount = useMemo(
+    () => shifts.filter((s) => s.verification_status === 'verified').length,
+    [shifts],
+  );
+
+  // --- API functions ---
+  async function loadCommunityBoard() {
+    setCommunityLoading(true);
+    setCommunityError('');
     try {
-      const { response: res, payload } = await fetchWithFallback(authBases, '/login', {
+      const params = new URLSearchParams();
+      if (communityFilterPlatform !== 'all') params.set('platform', communityFilterPlatform);
+      if (communityFilterCategory !== 'all') params.set('category', communityFilterCategory);
+
+      const { response, payload } = await fetchWithFallback(
+        grievanceBases,
+        `/complaints/public${params.toString() ? `?${params.toString()}` : ''}`,
+      );
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not load community feed'));
+        return;
+      }
+      setCommunityItems(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setCommunityLoading(false);
+    }
+  }
+
+  async function loadAdvocateComplaints() {
+    setCommunityLoading(true);
+    setCommunityError('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/advocate', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not load advocate complaints'));
+        return;
+      }
+      setAdvocateItems(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setCommunityLoading(false);
+    }
+  }
+
+  async function loadComplaintClusters() {
+    try {
+      const { response, payload } = await fetchWithFallback(
+        grievanceBases,
+        '/complaints/clusters?limit=100',
+        { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+      );
+      if (response.ok) {
+        setComplaintClusters(Array.isArray(payload) ? payload : []);
+      }
+    } catch {
+      setComplaintClusters([]);
+    }
+  }
+
+  async function loadComplaintSpikes() {
+    try {
+      const { response, payload } = await fetchWithFallback(
+        grievanceBases,
+        '/complaints/alerts/spikes?window_hours=3&min_count=5',
+        { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+      );
+      if (response.ok) {
+        setComplaintSpikes(Array.isArray(payload?.items) ? payload.items : []);
+      }
+    } catch {
+      setComplaintSpikes([]);
+    }
+  }
+
+  async function submitCommunityComplaint(e: FormEvent) {
+    e.preventDefault();
+    setCommunityError('');
+    setCommunitySuccess('');
+
+    if (communityForm.description.trim().length < 20) {
+      setCommunityError('Description must be at least 20 characters');
+      return;
+    }
+
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(communityForm),
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not submit complaint'));
+        return;
+      }
+
+      setCommunitySuccess('Complaint submitted');
+      setCommunityForm((prev) => ({ ...prev, description: '' }));
+      setShowCreateComplaintModal(false);
+      await loadCommunityBoard();
+      await loadMyComplaints();
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    }
+  }
+
+  async function loadMyComplaints() {
+    if (user?.role !== 'worker') return;
+
+    setMyComplaintsLoading(true);
+    setMyComplaintsError('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/mine', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      if (!response.ok) {
+        setMyComplaintsError(getErrorMessage(payload, 'Could not load your complaints'));
+        return;
+      }
+
+      setMyComplaints(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      setMyComplaintsError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setMyComplaintsLoading(false);
+    }
+  }
+
+  async function moderateAdvocateComplaint(id: string, patch: Partial<ComplaintItem>) {
+    setCommunityError('');
+    setCommunitySuccess('');
+    const body: Record<string, unknown> = {};
+    if (patch.category) body.category = patch.category;
+    if (patch.description !== undefined) body.description = patch.description;
+    if (patch.tags) body.tags = patch.tags;
+
+    const { response, payload } = await fetchWithFallback(
+      grievanceBases,
+      `/complaints/${id}/moderate`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    if (!response.ok) {
+      setCommunityError(getErrorMessage(payload, 'Could not moderate complaint'));
+      return;
+    }
+
+    setAdvocateItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...payload } : item)),
+    );
+    setCommunitySuccess('Complaint updated');
+  }
+
+  function toggleAdvocateSelection(id: string) {
+    setSelectedAdvocateIds((prev) =>
+      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id],
+    );
+  }
+
+  function toggleAllAdvocateSelection(checked: boolean) {
+    if (!checked) {
+      setSelectedAdvocateIds([]);
+      return;
+    }
+    setSelectedAdvocateIds(advocateItems.map((item) => item.id));
+  }
+
+  async function assignTagsToSelectedComplaints() {
+    const tags = bulkTagsInput
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+    if (selectedAdvocateIds.length < 1) {
+      setCommunityError('Select at least one complaint first');
+      return;
+    }
+    if (!tags.length) {
+      setCommunityError('Enter one or more tags separated by commas');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/bulk/tags', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ complaint_ids: selectedAdvocateIds, tags }),
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not assign tags'));
+        return;
+      }
+
+      setAdvocateItems((prev) =>
+        prev.map((item) => (selectedAdvocateIds.includes(item.id) ? { ...item, tags } : item)),
+      );
+      setSelectedAdvocateIds([]);
+      setCommunitySuccess(`Assigned tags to ${payload?.updated_count || 0} complaints`);
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function createClusterFromSelected() {
+    if (selectedAdvocateIds.length < 2) {
+      setCommunityError('Select at least two complaints to create a cluster');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/cluster', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          complaint_ids: selectedAdvocateIds,
+          name: clusterName || `Cluster ${new Date().toLocaleString()}`,
+          primary_tag: clusterTag || 'untagged',
+          platform: selectedAdvocateItems[0]?.platform || null,
+        }),
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not create cluster'));
+        return;
+      }
+
+      const clusterId = payload?.cluster?.id;
+      const linkedIds: string[] = payload?.linked_complaint_ids || [];
+      setAdvocateItems((prev) =>
+        prev.map((item) =>
+          linkedIds.includes(item.id) ? { ...item, cluster_id: clusterId } : item,
+        ),
+      );
+      setSelectedAdvocateIds([]);
+      setCommunitySuccess(`Cluster created. Linked ${payload?.linked_count || 0} complaints.`);
+      await loadComplaintClusters();
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function addToExistingCluster() {
+    if (!existingClusterId) {
+      setCommunityError('Select an existing cluster first');
+      return;
+    }
+    if (selectedAdvocateIds.length < 1) {
+      setCommunityError('Select at least one complaint');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(
+        grievanceBases,
+        `/complaints/cluster/${existingClusterId}/add`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ complaint_ids: selectedAdvocateIds }),
+        },
+      );
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not add complaints to cluster'));
+        return;
+      }
+
+      const linkedIds: string[] = payload?.linked_complaint_ids || [];
+      setAdvocateItems((prev) =>
+        prev.map((item) =>
+          linkedIds.includes(item.id) ? { ...item, cluster_id: existingClusterId } : item,
+        ),
+      );
+      setSelectedAdvocateIds([]);
+      setCommunitySuccess(`Added ${payload?.linked_count || 0} complaints to existing cluster.`);
+      await loadComplaintClusters();
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function setSelectedComplaintStatus(nextStatus: 'escalated' | 'resolved') {
+    if (selectedAdvocateIds.length < 1) {
+      setCommunityError('Select at least one complaint first');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      if (selectedClusterId) {
+        const { response, payload } = await fetchWithFallback(
+          grievanceBases,
+          `/complaints/cluster/${selectedClusterId}/status`,
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ status: nextStatus }),
+          },
+        );
+
+        if (!response.ok) {
+          setCommunityError(getErrorMessage(payload, 'Could not update cluster status'));
+          return;
+        }
+
+        setAdvocateItems((prev) =>
+          prev.map((item) =>
+            item.cluster_id === selectedClusterId ? { ...item, status: nextStatus } : item,
+          ),
+        );
+        setCommunitySuccess(`Cluster cascade applied to ${payload?.affected_count || 0} complaints.`);
+      } else {
+        const { response, payload } = await fetchWithFallback(
+          grievanceBases,
+          '/complaints/bulk/status',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ complaint_ids: selectedAdvocateIds, status: nextStatus }),
+          },
+        );
+
+        if (!response.ok) {
+          setCommunityError(getErrorMessage(payload, 'Could not update complaint status'));
+          return;
+        }
+
+        setAdvocateItems((prev) =>
+          prev.map((item) =>
+            selectedAdvocateIds.includes(item.id) ? { ...item, status: nextStatus } : item,
+          ),
+        );
+        setCommunitySuccess(`Updated ${payload?.updated_count || 0} complaints to ${nextStatus}.`);
+      }
+
+      setSelectedAdvocateIds([]);
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function unclusterComplaint(id: string) {
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(
+        grievanceBases,
+        `/complaints/${id}/uncluster`,
+        {
+          method: 'PUT',
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not un-cluster complaint'));
+        return;
+      }
+
+      setAdvocateItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...payload } : item)),
+      );
+      setCommunitySuccess('Complaint removed from cluster and moved back to open');
+      await loadComplaintClusters();
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    }
+  }
+
+  async function fetchProfile(authToken: string, currentUserId: string) {
+    try {
+      const { response: meRes, payload: mePayload } = await fetchWithFallback(authBases, '/me', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (meRes.ok) {
+        setUser(mePayload as AuthUser);
+
+        if (mePayload.role === 'worker') setActiveSection('earnings');
+        if (mePayload.role === 'verifier') setActiveSection('verifier');
+        if (mePayload.role === 'advocate') setActiveSection('community');
+
+        if (mePayload.role === 'verifier') {
+          const { response: shiftsRes, payload: shiftsPayload } = await fetchWithFallback(
+            earningsBases,
+            '',
+          );
+          if (shiftsRes.ok && Array.isArray(shiftsPayload)) {
+            const pending = shiftsPayload
+              .filter((s: Shift) => s.verification_status === 'pending')
+              .map(
+                (s: Shift): VerifierQueueItem => ({
+                  shift_id: s.id,
+                  worker_id: s.worker_id || 'unknown',
+                  worker_name: s.worker_name || 'Unknown Worker',
+                  city_zone: null,
+                  category: null,
+                  platform: s.platform,
+                  shift_date: s.shift_date,
+                  hours_worked: s.hours_worked,
+                  gross_earned: s.gross_earned,
+                  platform_deductions: s.platform_deductions,
+                  net_received: s.net_received,
+                  deduction_rate: Number(s.deduction_rate || 0),
+                  screenshot_url: s.screenshot_url || null,
+                  submitted_at: s.created_at || s.shift_date,
+                }),
+              );
+
+            const mine = shiftsPayload.filter(
+              (s: Shift) =>
+                s.verifier_id === mePayload.id && s.verification_status !== 'pending',
+            );
+            setVerifierQueue(pending);
+            setMyReviewedShifts(mine);
+          } else {
+            setVerifierQueue([]);
+            setMyReviewedShifts([]);
+          }
+          setShifts([]);
+          return;
+        }
+
+        setVerifierQueue([]);
+        setMyReviewedShifts([]);
+      } else {
+        setUser(null);
+      }
+
+      const { response: shiftsRes, payload: shiftsPayload } = await fetchWithFallback(
+        earningsBases,
+        `?worker_id=${encodeURIComponent(currentUserId)}`,
+      );
+      if (shiftsRes.ok) {
+        setShifts(Array.isArray(shiftsPayload) ? shiftsPayload : []);
+      } else {
+        setShifts([]);
+      }
+    } catch {
+      setUser(null);
+      setShifts([]);
+      setVerifierQueue([]);
+      setMyReviewedShifts([]);
+    }
+  }
+
+  async function handleVerifierDecision(
+    shiftId: string,
+    status: 'verified' | 'flagged' | 'unverifiable',
+  ) {
+    if (!user?.id) {
+      setDecisionError('Verifier user id not available');
+      return;
+    }
+
+    setDecisionLoadingId(shiftId);
+    setDecisionError('');
+    setDecisionSuccess('');
+
+    try {
+      const { response, payload } = await fetchWithFallback(
+        verifierBases,
+        `/${shiftId}/decision`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status,
+            verifier_id: user.id,
+            verifier_note: decisionNotes[shiftId] || '',
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        setDecisionError(getErrorMessage(payload, 'Could not update verification decision'));
+        return;
+      }
+
+      setDecisionSuccess(`Shift ${status} successfully`);
+      if (token && userId) {
+        await fetchProfile(token, userId);
+      }
+    } catch {
+      setDecisionError('Unable to connect to verifier service');
+    } finally {
+      setDecisionLoadingId(null);
+    }
+  }
+
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const { response, payload } = await fetchWithFallback(authBases, '/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm),
       });
-      const data = await res.json();
-      if (data.access_token) {
-        localStorage.setItem('fairgig_token', data.access_token);
-        localStorage.setItem('fairgig_user_id', data.user_id);
-        setToken(data.access_token);
+
+      if (!response.ok) {
+        setAuthError(getErrorMessage(payload, 'Login failed. Check your credentials.'));
+        return;
       }
-    } catch (e) {
-      console.error('Login failed', e);
+
+      if (payload.access_token) {
+        localStorage.setItem('fairgig_token', payload.access_token);
+        localStorage.setItem('fairgig_user_id', payload.user_id);
+        setToken(payload.access_token);
+        setUserId(payload.user_id);
+        await fetchProfile(payload.access_token, payload.user_id);
+      }
+    } catch (error) {
+      setAuthError(getUnknownErrorMessage(error, 'Unable to connect to auth service'));
+    } finally {
+      setAuthLoading(false);
     }
-  };
+  }
 
-  const fetchInitialData = async () => {
-    setLoading(true);
-    const userId = localStorage.getItem('fairgig_user_id');
+  async function handleRegister(e: FormEvent) {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
     try {
-      // Fetch Shifts
-      const sRes = await fetch(`/api/shifts?worker_id=${userId}`);
-      const sData = await sRes.json();
-      setShifts(sData);
+      const registerPayload = {
+        name: registerForm.name,
+        email: registerForm.email,
+        password: registerForm.password,
+        role: registerForm.role,
+        city_zone: registerForm.city_zone,
+        category: registerForm.category,
+        phone: registerForm.phone,
+      };
 
-      // Fetch Anomaly
-      const aRes = await fetch('/api/anomaly/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registerPayload),
-      });
+      const { response: registerRes, payload: registerData } = await fetchWithFallback(
+        authBases,
+        '/register',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(registerPayload),
+        },
+      );
 
       if (!registerRes.ok) {
         setAuthError(getErrorMessage(registerData, 'Signup failed'));
         return;
       }
 
-      const { response: loginRes, payload: loginData } = await fetchWithFallback(authBases, '/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: registerForm.email,
-          password: registerForm.password,
-        }),
-      });
+      const { response: loginRes, payload: loginData } = await fetchWithFallback(
+        authBases,
+        '/login',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: registerForm.email, password: registerForm.password }),
+        },
+      );
+
       if (!loginRes.ok) {
         setAuthError(getErrorMessage(loginData, 'Signup complete but auto-login failed'));
         return;
@@ -403,12 +1130,10 @@ export default function App() {
       setEarningsError('You must be logged in before adding earnings');
       return;
     }
-
     if (!screenshotFile) {
       setEarningsError('Screenshot is mandatory for submitting earnings');
       return;
     }
-
     if (!screenshotFile.type.startsWith('image/')) {
       setEarningsError('Screenshot must be an image file');
       return;
@@ -422,14 +1147,18 @@ export default function App() {
       return;
     }
 
+    const gross = Number(shiftForm.gross_earned);
+    const deductions = Number(shiftForm.platform_deductions);
+    const hours = Number(shiftForm.hours_worked);
+
     const payload = {
       worker_id: userId,
       platform: shiftForm.platform,
       shift_date: shiftForm.shift_date,
-      hours_worked: Number(shiftForm.hours_worked),
-      gross_earned: Number(shiftForm.gross_earned),
-      platform_deductions: Number(shiftForm.platform_deductions),
-      net_received: Number((Number(shiftForm.gross_earned) - Number(shiftForm.platform_deductions)).toFixed(2)),
+      hours_worked: hours,
+      gross_earned: gross,
+      platform_deductions: deductions,
+      net_received: Number((gross - deductions).toFixed(2)),
       notes: shiftForm.notes || null,
     };
 
@@ -452,7 +1181,7 @@ export default function App() {
           body: JSON.stringify({ worker_id: userId }),
         });
       } catch {
-        // Ignore rollback failures and preserve the original UI error.
+        // Ignore rollback failures.
       }
     };
 
@@ -462,6 +1191,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+
       if (!res.ok) {
         setEarningsError(getErrorMessage(data, 'Could not add earning'));
         return;
@@ -476,16 +1206,17 @@ export default function App() {
         formData.append('worker_id', userId);
         formData.append('file', screenshotFile);
 
-        const screenshotCall = await fetchWithFallback(earningsBases, `/${data.id}/screenshot`, {
-          method: 'POST',
-          body: formData,
-        });
+        const screenshotCall = await fetchWithFallback(
+          earningsBases,
+          `/${data.id}/screenshot`,
+          { method: 'POST', body: formData },
+        );
         screenshotRes = screenshotCall.response;
         screenshotPayload = screenshotCall.payload;
       } catch (error) {
         await rollbackCreatedShift();
         setEarningsError(
-          `Saved shift but could not reach screenshot endpoint on earnings service. ${getUnknownErrorMessage(error, 'Ensure earnings service is running on port 8002.')}`,
+          `Saved shift but could not reach screenshot endpoint. ${getUnknownErrorMessage(error, 'Ensure earnings service is running on port 8002.')}`,
         );
         return;
       }
@@ -498,11 +1229,7 @@ export default function App() {
 
       setEarningsSuccess('Earning added successfully');
       setShifts((prev) => [
-        {
-          ...data,
-          screenshot_url: screenshotPayload?.file_url || null,
-          has_screenshot: true,
-        },
+        { ...data, screenshot_url: screenshotPayload?.file_url || null },
         ...prev,
       ]);
       setShiftForm((prev) => ({ ...prev, notes: '' }));
@@ -515,203 +1242,1045 @@ export default function App() {
     } finally {
       setEarningsLoading(false);
     }
-  };
+  }
 
-  if (loading) return <div className="flex items-center justify-center h-screen font-black text-brand animate-pulse">FAIRGIG INITIALIZING...</div>;
+  function validateCsvRow(row: CsvDraftRow): string[] {
+    const errors: string[] = [];
+    const hours = Number(row.hours_worked);
+    const gross = Number(row.gross_earned);
+    const deductions = Number(row.platform_deductions);
+    const net = Number(row.net_received);
 
-  // Stats calculation
-  const totalVerifiedNet = shifts.filter(s => s.verification_status === 'verified').reduce((acc, curr) => acc + curr.net_received, 0);
-  const totalHours = shifts.filter(s => s.verification_status === 'verified').reduce((acc, curr) => acc + curr.hours_worked, 0);
-  const avgHourlyRate = totalHours > 0 ? totalVerifiedNet / totalHours : 0;
+    if (!platforms.includes(row.platform)) errors.push('platform is invalid');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.shift_date)) {
+      errors.push(`shift_date must be YYYY-MM-DD (received: ${row.shift_date || 'empty'})`);
+    }
+    if (!Number.isFinite(hours) || hours <= 0) errors.push('hours_worked must be > 0');
+    if (Number.isFinite(hours) && hours > 24) errors.push('hours_worked cannot exceed 24');
+    if (!Number.isFinite(gross) || gross < 0) errors.push('gross_earned must be >= 0');
+    if (!Number.isFinite(deductions) || deductions < 0) errors.push('platform_deductions must be >= 0');
+    if (!Number.isFinite(net) || net < 0) errors.push('net_received must be >= 0');
+    if (Number.isFinite(gross) && Number.isFinite(deductions) && Number.isFinite(net)) {
+      if (Math.abs(net - (gross - deductions)) > 0.05) {
+        errors.push('net_received must equal gross_earned - platform_deductions');
+      }
+    }
+
+    return errors;
+  }
+
+  async function handleCsvFileSelect(file: File | null) {
+    setCsvError('');
+    setCsvRows([]);
+    setCsvFileName('');
+
+    if (!file) return;
+
+    const isCsvFile = file.name.toLowerCase().endsWith('.csv') || file.type.includes('csv');
+    if (!isCsvFile) {
+      setCsvError('Unsupported file type. Please upload a .csv file');
+      return;
+    }
+    if (file.size > maxCsvBytes) {
+      setCsvError('CSV file is too large. Max allowed size is 5MB');
+      return;
+    }
+
+    const text = await file.text();
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (lines.length < 2) {
+      setCsvError('CSV must include a header row and at least one data row');
+      return;
+    }
+
+    const header = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+    const missing = csvRequiredColumns.filter((col) => !header.includes(col));
+    if (missing.length > 0) {
+      setCsvError(`Missing required columns: ${missing.join(', ')}`);
+      return;
+    }
+
+    const rows = lines.slice(1).map((line: string, idx: number): CsvDraftRow => {
+      const cells = splitCsvLine(line);
+      const valueOf = (key: string) => {
+        const colIndex = header.indexOf(key);
+        if (colIndex === -1) return '';
+        return (cells[colIndex] || '').trim();
+      };
+
+      const rawShiftDate = valueOf('shift_date');
+      const normalizedDate = normalizeCsvDate(rawShiftDate);
+
+      const row: CsvDraftRow = {
+        rowNumber: idx + 2,
+        platform: valueOf('platform'),
+        shift_date: normalizedDate.value,
+        hours_worked: valueOf('hours_worked'),
+        gross_earned: valueOf('gross_earned'),
+        platform_deductions: valueOf('platform_deductions'),
+        net_received: valueOf('net_received'),
+        notes: valueOf('notes'),
+        errors: [],
+        uploaded: false,
+        screenshotFile: null,
+        screenshotFileName: '',
+      };
+
+      row.errors = validateCsvRow(row);
+      if (normalizedDate.error) row.errors.push(normalizedDate.error);
+      return row;
+    });
+
+    const totalsByDate: Record<string, number> = {};
+    rows.forEach((row) => {
+      if (!row.errors.length) {
+        totalsByDate[row.shift_date] = (totalsByDate[row.shift_date] || 0) + Number(row.hours_worked || 0);
+      }
+    });
+    rows.forEach((row) => {
+      const dailyTotal = totalsByDate[row.shift_date] || 0;
+      if (dailyTotal > 24) {
+        row.errors.push(`CSV daily total exceeds 24 hours for ${row.shift_date}`);
+      }
+    });
+
+    setCsvFileName(file.name);
+    setCsvRows(rows);
+  }
+
+  function selectCsvRowScreenshot(index: number, file: File | null) {
+    if (!file) {
+      setCsvRows((prev) =>
+        prev.map((row, rowIndex) =>
+          rowIndex === index
+            ? { ...row, screenshotFile: null, screenshotFileName: '', uploaded: false, uploadedShiftId: undefined }
+            : row,
+        ),
+      );
+      return;
+    }
+
+    if (!supportedImageTypes.includes(file.type)) {
+      setCsvRows((prev) =>
+        prev.map((row, rowIndex) =>
+          rowIndex === index
+            ? { ...row, uploadError: 'Unsupported screenshot type. Allowed: JPG, PNG, WEBP' }
+            : row,
+        ),
+      );
+      return;
+    }
+    if (file.size > maxScreenshotBytes) {
+      setCsvRows((prev) =>
+        prev.map((row, rowIndex) =>
+          rowIndex === index ? { ...row, uploadError: 'Screenshot is too large. Max 10MB' } : row,
+        ),
+      );
+      return;
+    }
+
+    setCsvRows((prev) =>
+      prev.map((row, rowIndex) =>
+        rowIndex === index
+          ? {
+              ...row,
+              screenshotFile: file,
+              screenshotFileName: file.name,
+              uploadError: '',
+              uploaded: false,
+              uploadedShiftId: undefined,
+            }
+          : row,
+      ),
+    );
+  }
+
+  async function uploadCsvRow(index: number) {
+    if (!userId) {
+      setCsvError('You must be logged in to upload CSV rows');
+      return;
+    }
+
+    const row = csvRows[index];
+    if (!row || row.uploaded || row.errors.length > 0 || !row.screenshotFile) return;
+
+    setCsvBusy(true);
+    setCsvError('');
+
+    try {
+      const payload = {
+        worker_id: userId,
+        platform: row.platform,
+        shift_date: row.shift_date,
+        hours_worked: Number(row.hours_worked),
+        gross_earned: Number(row.gross_earned),
+        platform_deductions: Number(row.platform_deductions),
+        net_received: Number(row.net_received),
+        notes: row.notes || null,
+      };
+
+      const { response, payload: apiPayload } = await fetchWithFallback(earningsBases, '', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        setCsvRows((prev) =>
+          prev.map((item, itemIndex) =>
+            itemIndex === index
+              ? { ...item, uploadError: getErrorMessage(apiPayload, 'Upload failed') }
+              : item,
+          ),
+        );
+        return;
+      }
+
+      let screenshotSaveResponse: Response;
+      let screenshotSavePayload: any;
+      try {
+        const formData = new FormData();
+        formData.append('worker_id', userId);
+        formData.append('file', row.screenshotFile);
+
+        const screenshotCall = await fetchWithFallback(
+          earningsBases,
+          `/${apiPayload.id}/screenshot`,
+          { method: 'POST', body: formData },
+        );
+        screenshotSaveResponse = screenshotCall.response;
+        screenshotSavePayload = screenshotCall.payload;
+      } catch (error) {
+        await fetchWithFallback(earningsBases, `/${apiPayload.id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worker_id: userId }),
+        });
+        setCsvRows((prev) =>
+          prev.map((item, itemIndex) =>
+            itemIndex === index
+              ? { ...item, uploadError: getUnknownErrorMessage(error, 'Screenshot upload failed') }
+              : item,
+          ),
+        );
+        return;
+      }
+
+      if (!screenshotSaveResponse.ok) {
+        await fetchWithFallback(earningsBases, `/${apiPayload.id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worker_id: userId }),
+        });
+        setCsvRows((prev) =>
+          prev.map((item, itemIndex) =>
+            itemIndex === index
+              ? {
+                  ...item,
+                  uploadError: getErrorMessage(screenshotSavePayload, 'Could not save screenshot for row'),
+                }
+              : item,
+          ),
+        );
+        return;
+      }
+
+      setCsvRows((prev) =>
+        prev.map((item, itemIndex) =>
+          itemIndex === index
+            ? { ...item, uploaded: true, uploadedShiftId: apiPayload.id, uploadError: '' }
+            : item,
+        ),
+      );
+      setShifts((prev) => [
+        { ...apiPayload, screenshot_url: screenshotSavePayload?.file_url || null },
+        ...prev,
+      ]);
+    } catch (error) {
+      setCsvRows((prev) =>
+        prev.map((item, itemIndex) =>
+          itemIndex === index
+            ? { ...item, uploadError: getUnknownErrorMessage(error, 'Upload failed') }
+            : item,
+        ),
+      );
+    } finally {
+      setCsvBusy(false);
+    }
+  }
+
+  async function uploadAllValidCsvRows() {
+    const targets = csvRows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => !row.uploaded && isCsvRowReady(row));
+
+    for (const target of targets) {
+      await uploadCsvRow(target.index);
+    }
+  }
+
+  function beginEditShift(shift: Shift) {
+    setEditingShiftId(shift.id);
+    setEditForm({
+      platform: shift.platform,
+      shift_date: shift.shift_date,
+      hours_worked: String(shift.hours_worked),
+      gross_earned: String(shift.gross_earned),
+      platform_deductions: String(shift.platform_deductions),
+      notes: shift.notes || '',
+    });
+  }
+
+  async function saveShiftEdit(e: FormEvent) {
+    e.preventDefault();
+
+    if (!userId || !editingShiftId || !editForm) {
+      setEarningsError('Unable to save changes');
+      return;
+    }
+
+    const gross = Number(editForm.gross_earned);
+    const deductions = Number(editForm.platform_deductions);
+    const hours = Number(editForm.hours_worked);
+    const net = Number((gross - deductions).toFixed(2));
+
+    if (!Number.isFinite(gross) || !Number.isFinite(deductions) || !Number.isFinite(hours) || hours <= 0) {
+      setEarningsError('Please provide valid numeric values for edit');
+      return;
+    }
+
+    const { response, payload } = await fetchWithFallback(earningsBases, `/${editingShiftId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        worker_id: userId,
+        platform: editForm.platform,
+        shift_date: editForm.shift_date,
+        hours_worked: hours,
+        gross_earned: gross,
+        platform_deductions: deductions,
+        net_received: net,
+        notes: editForm.notes || null,
+      }),
+    });
+
+    if (!response.ok) {
+      setEarningsError(getErrorMessage(payload, 'Could not update shift'));
+      return;
+    }
+
+    setShifts((prev) => prev.map((item) => (item.id === editingShiftId ? payload : item)));
+    setEditingShiftId(null);
+    setEditForm(null);
+    setEarningsSuccess('Shift updated successfully');
+  }
+
+  async function deleteShift(shiftId: string) {
+    if (!userId) return;
+
+    const { response, payload } = await fetchWithFallback(earningsBases, `/${shiftId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ worker_id: userId }),
+    });
+
+    if (!response.ok) {
+      setEarningsError(getErrorMessage(payload, 'Could not delete shift'));
+      return;
+    }
+
+    setShifts((prev) => prev.filter((item) => item.id !== shiftId));
+    setCsvRows((prev) =>
+      prev.map((row) =>
+        row.uploadedShiftId === shiftId
+          ? { ...row, uploaded: false, uploadedShiftId: undefined, uploadError: '' }
+          : row,
+      ),
+    );
+    if (editingShiftId === shiftId) {
+      setEditingShiftId(null);
+      setEditForm(null);
+    }
+    setEarningsSuccess('Shift deleted successfully');
+  }
+
+  function logout() {
+    localStorage.removeItem('fairgig_token');
+    localStorage.removeItem('fairgig_user_id');
+    setToken(null);
+    setUserId(null);
+    setUser(null);
+    setShifts([]);
+    setVerifierQueue([]);
+    setMyReviewedShifts([]);
+    setDecisionNotes({});
+    setDecisionError('');
+    setDecisionSuccess('');
+    setCommunityError('');
+    setCommunitySuccess('');
+    setSelectedAdvocateIds([]);
+    setComplaintClusters([]);
+    setComplaintSpikes([]);
+    setExistingClusterId('');
+    setBulkTagsInput('');
+    setShowCreateComplaintModal(false);
+    setShowMyComplaintsModal(false);
+    setMyComplaints([]);
+    setMyComplaintsLoading(false);
+    setMyComplaintsError('');
+    setPreviewScreenshotUrl(null);
+    setAuthError('');
+    setEarningsError('');
+    setEarningsSuccess('');
+  }
+
+  // --- Effects ---
+  useEffect(() => {
+    if (token && userId && !user) {
+      void fetchProfile(token, userId);
+    }
+  }, [token, userId]);
+
+  useEffect(() => {
+    if (user?.role === 'worker' || user?.role === 'advocate') {
+      void loadCommunityBoard();
+    }
+  }, [communityFilterCategory, communityFilterPlatform, user?.role]);
+
+  useEffect(() => {
+    if (user?.role === 'advocate') {
+      if (activeSection === 'advocate') {
+        void loadAdvocateComplaints();
+        void loadComplaintClusters();
+      }
+      void loadComplaintSpikes();
+    }
+  }, [activeSection, user?.role]);
+
+  useEffect(() => {
+    if (showMyComplaintsModal && user?.role === 'worker') {
+      void loadMyComplaints();
+    }
+  }, [showMyComplaintsModal, user?.role]);
+
+  // --- Auth screen ---
+  if (!token || !userId) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-emerald-100 via-white to-cyan-100 px-4 py-10">
+        <div className="mx-auto max-w-5xl rounded-3xl border border-emerald-200 bg-white/90 p-6 shadow-xl backdrop-blur sm:p-10">
+          <div className="grid gap-8 md:grid-cols-2">
+            <section>
+              <p className="mb-2 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                FairGig Platform
+              </p>
+              <h1 className="text-3xl font-black text-slate-900 sm:text-4xl">
+                Login or Sign Up to Continue
+              </h1>
+              <p className="mt-3 text-sm text-slate-600">
+                Choose your role while signing up, and start tracking verified gig earnings from day one.
+              </p>
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                Duplicate email protection is enabled. You cannot create two accounts with the same email.
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-5 flex gap-2 rounded-xl bg-slate-100 p-1">
+                <button
+                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${mode === 'login' ? 'bg-white text-slate-900 shadow' : 'text-slate-600'}`}
+                  onClick={() => { setMode('login'); setAuthError(''); }}
+                  type="button"
+                >
+                  Login
+                </button>
+                <button
+                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${mode === 'signup' ? 'bg-white text-slate-900 shadow' : 'text-slate-600'}`}
+                  onClick={() => { setMode('signup'); setAuthError(''); }}
+                  type="button"
+                >
+                  Sign Up
+                </button>
+              </div>
+
+              {authError && (
+                <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+                  {authError}
+                </p>
+              )}
+
+              {mode === 'login' ? (
+                <form onSubmit={handleLogin} className="space-y-3">
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    required
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={loginForm.email}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLoginForm((prev: typeof loginForm) => ({ ...prev, email: e.target.value }))}
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    required
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={loginForm.password}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLoginForm((prev: typeof loginForm) => ({ ...prev, password: e.target.value }))}
+                  />
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {authLoading ? 'Logging in…' : 'Login'}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleRegister} className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    required
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.name}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRegisterForm((prev: typeof registerForm) => ({ ...prev, name: e.target.value }))}
+                  />
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    required
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.email}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRegisterForm((prev: typeof registerForm) => ({ ...prev, email: e.target.value }))}
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    required
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.password}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRegisterForm((prev: typeof registerForm) => ({ ...prev, password: e.target.value }))}
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Phone"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.phone}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRegisterForm((prev: typeof registerForm) => ({ ...prev, phone: e.target.value }))}
+                  />
+                  <select
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.role}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRegisterForm((prev: typeof registerForm) => ({ ...prev, role: e.target.value as UserRole }))}
+                  >
+                    {roles.map((r: string) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.city_zone}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRegisterForm((prev: typeof registerForm) => ({ ...prev, city_zone: e.target.value }))}
+                  >
+                    {zones.map((z: string) => (
+                      <option key={z} value={z}>{z}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.category}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRegisterForm((prev: typeof registerForm) => ({ ...prev, category: e.target.value }))}
+                  >
+                    {categories.map((c: string) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {authLoading ? 'Creating account…' : 'Sign Up'}
+                  </button>
+                </form>
+              )}
+            </section>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // --- Authenticated App Shell ---
+  const navItems: { section: AppSection; label: string; icon: React.ReactNode; roles: UserRole[] }[] = [
+    { section: 'earnings', label: 'Earnings', icon: <LayoutDashboard className="w-4 h-4" />, roles: ['worker'] },
+    { section: 'community', label: 'Community', icon: <History className="w-4 h-4" />, roles: ['worker', 'advocate'] },
+    { section: 'advocate', label: 'Moderation', icon: <FileText className="w-4 h-4" />, roles: ['advocate'] },
+    { section: 'verifier', label: 'Verifier', icon: <CheckCircle2 className="w-4 h-4" />, roles: ['verifier'] },
+  ];
+
+  const visibleNav = navItems.filter((item) => user?.role && item.roles.includes(user.role));
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* Header */}
-      <header className="bg-card border-b border-border-dim px-8 h-16 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-8">
-          <div className="text-2xl font-black tracking-tighter text-brand flex items-center gap-2">
-            <LayoutDashboard className="w-6 h-6" />
-            FairGig
+    <main className="min-h-screen bg-slate-50">
+      {/* Top nav */}
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-6">
+            <span className="text-lg font-black text-emerald-700">FairGig</span>
+            <nav className="hidden gap-1 sm:flex">
+              {visibleNav.map((item) => (
+                <button
+                  key={item.section}
+                  type="button"
+                  onClick={() => setActiveSection(item.section)}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                    activeSection === item.section
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              ))}
+            </nav>
           </div>
-          <nav className="flex gap-6">
-            {(user?.role === 'advocate' 
-              ? ['dashboard', 'analytics', 'grievances'] 
-              : ['dashboard', 'shifts', 'grievances', 'certificate']
-            ).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab as any)}
-                className={`text-sm font-semibold capitalize pt-1 pb-1 transition-all relative ${
-                  activeTab === tab ? 'text-text-main' : 'text-text-muted hover:text-text-main'
-                }`}
-              >
-                {tab}
-                {activeTab === tab && (
-                  <motion.div layoutId="nav-underline" className="absolute bottom-[-1.5rem] left-0 right-0 h-0.5 bg-brand" />
-                )}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <div className="text-sm font-bold text-text-main">{MOCK_USER.name}</div>
-            <div className="text-[10px] text-text-muted tracking-wide">ID: {MOCK_USER.id}</div>
-          </div>
-          <div className="w-9 h-9 bg-gray-100 border border-border-dim rounded-full flex items-center justify-center">
-            <User className="w-5 h-5 text-text-muted" />
+          <div className="flex items-center gap-3">
+            <span className="hidden text-xs font-medium text-slate-500 sm:block">
+              <User className="mr-1 inline h-3 w-3" />
+              {user?.name} · {user?.role}
+            </span>
+            <button
+              type="button"
+              onClick={logout}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <LogOut className="h-3 w-3" />
+              Logout
+            </button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+      <div className="mx-auto max-w-7xl px-4 py-6">
         <AnimatePresence mode="wait">
-          {activeTab === 'dashboard' && (
-            <motion.div
-              key="dashboard"
+          {/* ── EARNINGS SECTION ── */}
+          {activeSection === 'earnings' && user?.role === 'worker' && (
+            <motion.section
+              key="earnings"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="grid grid-cols-1 md:grid-cols-4 gap-5"
+              className="space-y-6"
             >
-              {/* Hero Chart Card */}
-              <div className="card-bento md:col-span-2 md:row-span-2">
-                <div className="flex justify-between mb-4">
-                  <div className="card-title-bento">Earnings Overview (30D)</div>
-                  <div className="text-[10px] font-bold text-brand bg-brand/10 px-2 py-0.5 rounded-full">+12.5%</div>
+              {/* Stats row */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Net</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">
+                    PKR {totalNet.toFixed(0)}
+                  </p>
                 </div>
-                <div className="big-value">Rs. 85,400</div>
-                <div className="text-xs text-text-muted mb-4 font-medium flex items-center gap-1">
-                  Total verified earnings across platforms
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Avg Hourly Rate</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">
+                    PKR {avgHourlyRate.toFixed(0)}/hr
+                  </p>
                 </div>
-                <div className="flex-1 min-h-[240px] mt-2">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Verified Shifts</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">
+                    {verifiedCount} / {shifts.length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Chart */}
+              {shifts.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="mb-4 text-sm font-bold text-slate-800">Earnings Trend</p>
+                  <ResponsiveContainer width="100%" height={200}>
                     <AreaChart data={EARNINGS_TREND}>
                       <defs>
                         <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                      <XAxis dataKey="name" hide />
-                      <YAxis hide domain={['dataMin - 500', 'dataMax + 500']} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#fff', 
-                          borderRadius: '12px', 
-                          border: '1px solid #E5E7EB',
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                        }}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="value" 
-                        stroke="#10b981" 
+                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                      <YAxis hide />
+                      <Tooltip />
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        stroke="#10b981"
                         strokeWidth={3}
-                        fillOpacity={1} 
-                        fill="url(#colorValue)" 
+                        fillOpacity={1}
+                        fill="url(#colorValue)"
                       />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
-              </div>
+              )}
 
-              {/* Stat Card 1 */}
-              <div className="card-bento bg-white">
-                <div className="card-title-bento">Verification</div>
-                <div className="mt-2">
-                  <span className="badge-bento">94% Success</span>
+              {/* Add Earning Form */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEntryMode('manual')}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${entryMode === 'manual' ? 'bg-emerald-600 text-white' : 'border border-slate-300 text-slate-600'}`}
+                  >
+                    Manual Entry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEntryMode('csv')}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${entryMode === 'csv' ? 'bg-emerald-600 text-white' : 'border border-slate-300 text-slate-600'}`}
+                  >
+                    CSV Upload
+                  </button>
                 </div>
-                <div className="big-value text-2xl mt-4">28 / 30</div>
-                <div className="text-xs text-text-muted font-medium">Shifts verified this month</div>
-              </div>
 
-              {/* Anomaly Card */}
-              <div className={`card-bento ${anomaly?.anomalies?.length > 0 ? 'bg-red-50 border-red-100' : 'bg-white'}`}>
-                {anomaly?.anomalies?.length > 0 ? (
-                  <>
-                    <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="w-5 h-5 text-danger" />
-                      <div className="text-xs font-bold text-danger uppercase tracking-wider">Anomaly Flagged</div>
+                {entryMode === 'manual' && (
+                  <form onSubmit={handleAddEarning} className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <select
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={shiftForm.platform}
+                        onChange={(e) => setShiftForm((prev) => ({ ...prev, platform: e.target.value }))}
+                      >
+                        {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <input
+                        type="date"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={shiftForm.shift_date}
+                        onChange={(e) => setShiftForm((prev) => ({ ...prev, shift_date: e.target.value }))}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Hours Worked"
+                        min="0.1"
+                        step="0.1"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={shiftForm.hours_worked}
+                        onChange={(e) => setShiftForm((prev) => ({ ...prev, hours_worked: e.target.value }))}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Gross Earned (PKR)"
+                        min="0"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={shiftForm.gross_earned}
+                        onChange={(e) => setShiftForm((prev) => ({ ...prev, gross_earned: e.target.value }))}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Platform Deductions (PKR)"
+                        min="0"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={shiftForm.platform_deductions}
+                        onChange={(e) => setShiftForm((prev) => ({ ...prev, platform_deductions: e.target.value }))}
+                      />
+                      <div className="flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                        Net Preview: PKR {netPreview.toFixed(2)}
+                      </div>
                     </div>
-                    <div className="text-[13px] font-bold text-text-main mb-1">{anomaly.anomalies[0].type.replace('_', ' ')}</div>
-                    <p className="text-[11px] leading-relaxed text-text-main opacity-80">
-                      {anomaly.anomalies[0].explanation}. Our service suggests a dispute.
-                    </p>
-                    <div className="mt-auto">
-                      <button className="text-[10px] font-bold text-danger underline underline-offset-2">View Analysis</button>
+                    <textarea
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="Notes (optional)"
+                      rows={2}
+                      value={shiftForm.notes}
+                      onChange={(e) => setShiftForm((prev) => ({ ...prev, notes: e.target.value }))}
+                    />
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">
+                        Screenshot (required)
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="w-full text-sm"
+                        onChange={(e) => setScreenshotFile(e.target.files?.[0] ?? null)}
+                      />
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2 mb-2">
-                      <CheckCircle2 className="w-5 h-5 text-brand" />
-                      <div className="text-xs font-bold text-brand uppercase tracking-wider">System Healthy</div>
-                    </div>
-                    <div className="text-[13px] font-bold text-text-main mb-1">No Anomalies</div>
-                    <p className="text-[11px] leading-relaxed text-text-muted">
-                      Your deduction rates are within platform norms for your zone.
-                    </p>
-                  </>
+                    {earningsError && (
+                      <p className="text-sm font-medium text-red-600">{earningsError}</p>
+                    )}
+                    {earningsSuccess && (
+                      <p className="text-sm font-medium text-emerald-600">{earningsSuccess}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={earningsLoading}
+                      className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {earningsLoading ? 'Saving…' : 'Add Earning'}
+                    </button>
+                  </form>
+                )}
+
+                {entryMode === 'csv' && (
+                  <div className="space-y-3">
+                    <input
+                      type="file"
+                      accept=".csv"
+                      className="w-full text-sm"
+                      onChange={(e) => void handleCsvFileSelect(e.target.files?.[0] ?? null)}
+                    />
+                    {csvError && <p className="text-sm font-medium text-red-600">{csvError}</p>}
+                    {csvRows.length > 0 && (
+                      <>
+                        <p className="text-xs text-slate-500">
+                          {csvFileName} — {csvRows.length} rows
+                        </p>
+                        <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                          {csvRows.map((row, idx) => (
+                            <div
+                              key={row.rowNumber}
+                              className={`flex flex-wrap items-start gap-2 border-b border-slate-100 p-2 text-xs ${row.errors.length > 0 ? 'bg-red-50' : row.uploaded ? 'bg-emerald-50' : ''}`}
+                            >
+                              <span className="font-mono text-slate-500">R{row.rowNumber}</span>
+                              <span>{row.platform}</span>
+                              <span>{row.shift_date}</span>
+                              <span>{row.hours_worked}h</span>
+                              <span>PKR {row.gross_earned}</span>
+                              {row.errors.length > 0 && (
+                                <span className="text-red-600">{row.errors.join('; ')}</span>
+                              )}
+                              {row.errors.length === 0 && !row.uploaded && (
+                                <>
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    className="text-xs"
+                                    onChange={(e) => selectCsvRowScreenshot(idx, e.target.files?.[0] ?? null)}
+                                  />
+                                  {row.screenshotFile && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void uploadCsvRow(idx)}
+                                      disabled={csvBusy}
+                                      className="rounded bg-emerald-600 px-2 py-0.5 text-white disabled:opacity-60"
+                                    >
+                                      Upload
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {row.uploaded && (
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                              )}
+                              {row.uploadError && (
+                                <span className="text-red-600">{row.uploadError}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void uploadAllValidCsvRows()}
+                          disabled={csvBusy}
+                          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          Upload All Valid Rows
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
 
-              {/* Stat Card 2 */}
-              <div className="card-bento bg-white">
-                <div className="card-title-bento">Hourly Rate</div>
-                <div className="big-value text-2xl">Rs. 274/hr</div>
-                <div className="flex items-center gap-1.5 mt-2">
-                  <span className="text-xs font-bold text-brand">Superior</span>
-                  <span className="text-[10px] text-text-muted">Avg: Rs. 260</span>
+              {/* Shifts table */}
+              {shifts.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-5 py-3">
+                    <h2 className="text-sm font-bold text-slate-800">My Shifts</h2>
+                  </div>
+                  <div className="overflow-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold text-slate-600">Platform</th>
+                          <th className="px-4 py-3 font-semibold text-slate-600">Date</th>
+                          <th className="px-4 py-3 font-semibold text-slate-600">Hours</th>
+                          <th className="px-4 py-3 font-semibold text-slate-600">Gross</th>
+                          <th className="px-4 py-3 font-semibold text-slate-600">Net</th>
+                          <th className="px-4 py-3 font-semibold text-slate-600">Status</th>
+                          <th className="px-4 py-3 font-semibold text-slate-600">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {shifts.map((shift) => (
+                          <tr key={shift.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-3 font-semibold">{shift.platform}</td>
+                            <td className="px-4 py-3 text-slate-500">{shift.shift_date}</td>
+                            <td className="px-4 py-3">{shift.hours_worked}h</td>
+                            <td className="px-4 py-3 text-slate-500">PKR {shift.gross_earned}</td>
+                            <td className="px-4 py-3 font-bold">PKR {shift.net_received}</td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${
+                                  shift.verification_status === 'verified'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : shift.verification_status === 'pending'
+                                    ? 'bg-yellow-100 text-yellow-800'
+                                    : 'bg-red-100 text-red-800'
+                                }`}
+                              >
+                                {shift.verification_status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => beginEditShift(shift)}
+                                  className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void deleteShift(shift.id)}
+                                  className="rounded border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-600"
+                                >
+                                  Delete
+                                </button>
+                                {shift.screenshot_url && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewScreenshotUrl(shift.screenshot_url!)}
+                                    className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                                  >
+                                    Screenshot
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Median Card */}
-              <div className="card-bento bg-white">
-                <div className="card-title-bento">City Comparison</div>
-                <div className="text-[11px] font-bold mb-3">{MOCK_USER.city_zone} Median</div>
-                <div className="w-full h-2 bg-gray-100 rounded-full relative overflow-visible">
-                  <div className="absolute top-0 left-0 h-full bg-brand rounded-full" 
-                       style={{ width: `${Math.min(100, (avgHourlyRate / (median * 1.5)) * 100)}%` }} />
-                  <div className="absolute top-[-4px] left-[66%] h-4 w-0.5 bg-black" />
+              {/* Inline edit form */}
+              {editingShiftId && editForm && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-sm font-bold text-slate-800">Edit Shift</h3>
+                  <form onSubmit={saveShiftEdit} className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <select
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={editForm.platform}
+                        onChange={(e) => setEditForm((prev) => prev ? { ...prev, platform: e.target.value } : prev)}
+                      >
+                        {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <input
+                        type="date"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={editForm.shift_date}
+                        onChange={(e) => setEditForm((prev) => prev ? { ...prev, shift_date: e.target.value } : prev)}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Hours Worked"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={editForm.hours_worked}
+                        onChange={(e) => setEditForm((prev) => prev ? { ...prev, hours_worked: e.target.value } : prev)}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Gross Earned"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={editForm.gross_earned}
+                        onChange={(e) => setEditForm((prev) => prev ? { ...prev, gross_earned: e.target.value } : prev)}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Platform Deductions"
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={editForm.platform_deductions}
+                        onChange={(e) => setEditForm((prev) => prev ? { ...prev, platform_deductions: e.target.value } : prev)}
+                      />
+                    </div>
+                    <textarea
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      rows={2}
+                      placeholder="Notes"
+                      value={editForm.notes}
+                      onChange={(e) => setEditForm((prev) => prev ? { ...prev, notes: e.target.value } : prev)}
+                    />
+                    {earningsError && <p className="text-sm font-medium text-red-600">{earningsError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
+                      >
+                        Save Changes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingShiftId(null); setEditForm(null); }}
+                        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
                 </div>
-                <div className="flex flex-wrap gap-2">
+              )}
+            </motion.section>
+          )}
+
+          {/* ── COMMUNITY SECTION ── */}
+          {activeSection === 'community' && (user?.role === 'worker' || user?.role === 'advocate') && (
+            <motion.section
+              key="community"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-xl font-bold text-slate-900">Community Board</h2>
+                <div className="flex gap-2">
                   <button
                     type="button"
-                    className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                    onClick={() => {
-                      setCommunityError('');
-                      setCommunitySuccess('');
-                      setShowCreateComplaintModal(true);
-                    }}
+                    onClick={() => { setCommunityError(''); setCommunitySuccess(''); setShowCreateComplaintModal(true); }}
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
                   >
                     + New Complaint
                   </button>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    onClick={() => setShowMyComplaintsModal(true)}
-                  >
-                    My Previous Complaints
-                  </button>
+                  {user?.role === 'worker' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowMyComplaintsModal(true)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    >
+                      My Complaints
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="flex flex-wrap gap-2">
                 <select
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={communityFilterPlatform}
                   onChange={(e) => setCommunityFilterPlatform(e.target.value)}
                 >
                   <option value="all">All Platforms</option>
-                  {platforms.map((platform) => (
-                    <option key={platform} value={platform}>
-                      {platform}
-                    </option>
-                  ))}
+                  {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
                 <select
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -728,156 +2297,393 @@ export default function App() {
                 </select>
               </div>
 
-              {/* Recent Activity Card */}
-              <div className="card-bento md:col-span-2">
-                <div className="card-title-bento">Recent Verified Shifts</div>
-                <div className="space-y-1">
-                  {shifts.slice(0, 3).map((shift) => (
-                    <div key={shift.id} className="flex items-center justify-between py-2 border-b border-border-dim last:border-0 hover:bg-gray-50/50 px-2 rounded-lg transition-colors cursor-pointer group">
-                      <div className="flex items-center gap-3">
-                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
-                          shift.platform === 'Careem' ? 'bg-green-100 text-green-700' : 
-                          shift.platform === 'Bykea' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100'
-                        }`}>
-                          {shift.platform}
+              {communityError && <p className="text-sm font-medium text-red-600">{communityError}</p>}
+              {communitySuccess && <p className="text-sm font-medium text-emerald-600">{communitySuccess}</p>}
+
+              {communityLoading ? (
+                <p className="text-sm text-slate-600">Loading…</p>
+              ) : communityItems.length === 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+                  No complaints found for the selected filters.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {communityItems.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                          {item.platform}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                          {item.category}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-semibold capitalize ${
+                            item.status === 'resolved'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : item.status === 'escalated'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {item.status}
+                        </span>
+                        {item.is_anonymous
+                          ? <span>Anonymous</span>
+                          : <span>{item.worker_name || 'Unknown'}</span>}
+                        {item.created_at && (
+                          <span>{new Date(item.created_at).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm text-slate-800">{item.description}</p>
+                      {item.tags && item.tags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {item.tags.map((tag) => (
+                            <span key={tag} className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                              {tag}
+                            </span>
+                          ))}
                         </div>
-                        <div className="text-xs font-semibold text-text-main">{shift.shift_date}</div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-xs font-black">Rs. {shift.net_received}</div>
-                        <CheckCircle2 className="w-3.5 h-3.5 text-brand" />
-                        <ChevronRight className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
+                      )}
                     </div>
                   ))}
                 </div>
-              </div>
-
-              {/* Actions Card */}
-              <div className="card-bento md:col-span-2 flex-row items-center gap-6 overflow-hidden">
-                <div className="flex-1">
-                  <div className="card-title-bento">Quick Actions</div>
-                  <p className="text-[11px] text-text-muted mt-1">Manage your earnings documentation and support requests.</p>
-                </div>
-                <div className="flex gap-3">
-                  <button className="btn-bento btn-bento-outline flex gap-2">
-                    <FileText className="w-4 h-4" />
-                    Certificate
-                  </button>
-                  <button className="btn-bento btn-bento-primary flex gap-2">
-                    <Plus className="w-4 h-4" />
-                    New Shift
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+              )}
+            </motion.section>
           )}
 
-          {activeTab === 'shifts' && (
-            <motion.div
-              key="shifts"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-6"
+          {/* ── ADVOCATE SECTION ── */}
+          {activeSection === 'advocate' && user?.role === 'advocate' && (
+            <motion.section
+              key="advocate"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-4"
             >
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-black">My Shifts</h2>
-                <button className="btn-bento btn-bento-primary flex gap-2">
-                  <Plus className="w-4 h-4" />
-                  Log Shift
-                </button>
+              <div className="grid gap-4 xl:grid-cols-[1fr,280px]">
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-lg font-bold text-slate-900">Advocate Moderation Queue</h2>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                      onClick={() => {
+                        void loadAdvocateComplaints();
+                        void loadComplaintSpikes();
+                        void loadComplaintClusters();
+                      }}
+                    >
+                      Refresh Queue
+                    </button>
+                  </div>
+
+                  {communityError && <p className="text-sm font-medium text-red-600">{communityError}</p>}
+                  {communitySuccess && <p className="text-sm font-medium text-emerald-600">{communitySuccess}</p>}
+
+                  {communityLoading ? (
+                    <p className="text-sm text-slate-600">Loading complaints…</p>
+                  ) : advocateItems.length === 0 ? (
+                    <p className="text-sm text-slate-600">No complaints available.</p>
+                  ) : (
+                    <div className="overflow-hidden rounded-lg border border-slate-200">
+                      <div className="grid grid-cols-[32px,150px,120px,1fr,130px,140px] gap-2 border-b border-slate-200 bg-slate-50 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        <label className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            checked={advocateItems.length > 0 && selectedAdvocateIds.length === advocateItems.length}
+                            onChange={(e) => toggleAllAdvocateSelection(e.target.checked)}
+                          />
+                        </label>
+                        <span>Time</span>
+                        <span>Platform</span>
+                        <span>Preview</span>
+                        <span>Status</span>
+                        <span>Cluster</span>
+                      </div>
+                      <div className="max-h-[65vh] overflow-auto">
+                        {advocateItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="grid grid-cols-[32px,150px,120px,1fr,130px,140px] gap-2 border-b border-slate-100 px-2 py-2 text-xs text-slate-700"
+                          >
+                            <label className="flex items-start justify-center pt-1">
+                              <input
+                                type="checkbox"
+                                checked={selectedAdvocateIds.includes(item.id)}
+                                onChange={() => toggleAdvocateSelection(item.id)}
+                              />
+                            </label>
+                            <div>
+                              <p>{item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</p>
+                              <p className="truncate text-[11px] text-slate-500">
+                                {item.worker_name || item.worker_id || 'Unknown'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-800">{item.platform}</p>
+                              <select
+                                className="mt-1 w-full rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+                                value={item.category}
+                                onChange={(e) =>
+                                  void moderateAdvocateComplaint(item.id, { category: e.target.value as any })
+                                }
+                              >
+                                <option value="commission_hike">commission_hike</option>
+                                <option value="account_deactivation">account_deactivation</option>
+                                <option value="payment_delay">payment_delay</option>
+                                <option value="unfair_rating">unfair_rating</option>
+                                <option value="data_privacy">data_privacy</option>
+                                <option value="other">other</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="truncate font-semibold text-slate-900">
+                                {item.description.slice(0, 85)}
+                              </p>
+                              <textarea
+                                className="h-12 w-full rounded border border-slate-300 px-2 py-1 text-[11px]"
+                                defaultValue={item.description}
+                                onBlur={(e) =>
+                                  void moderateAdvocateComplaint(item.id, { description: e.target.value })
+                                }
+                              />
+                              <input
+                                className="w-full rounded border border-slate-300 px-2 py-1 text-[11px]"
+                                defaultValue={(item.tags || []).join(',')}
+                                onBlur={(e) =>
+                                  void moderateAdvocateComplaint(item.id, {
+                                    tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${
+                                  item.status === 'resolved'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : item.status === 'escalated'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : item.status === 'rejected'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                {item.status}
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="truncate text-[11px] text-slate-500">
+                                {item.cluster_id || 'Unclustered'}
+                              </p>
+                              {item.cluster_id && (
+                                <button
+                                  type="button"
+                                  className="rounded border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700"
+                                  onClick={() => void unclusterComplaint(item.id)}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <aside className="space-y-3">
+                  <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-900">Spike Alert (3h)</h3>
+                    <div className="mt-2 space-y-2">
+                      {complaintSpikes.length === 0 ? (
+                        <p className="text-xs text-slate-500">No major spikes detected.</p>
+                      ) : (
+                        complaintSpikes.slice(0, 8).map((spike) => (
+                          <div
+                            key={`${spike.platform}-${spike.category}`}
+                            className="rounded border border-amber-200 bg-amber-50 p-2"
+                          >
+                            <p className="text-xs font-semibold text-amber-900">
+                              {spike.platform} · {spike.category}
+                            </p>
+                            <p className="text-[11px] text-amber-800">
+                              {spike.count} complaints in last 3h
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-900">Existing Clusters</h3>
+                    <select
+                      className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs"
+                      value={existingClusterId}
+                      onChange={(e) => setExistingClusterId(e.target.value)}
+                    >
+                      <option value="">Select cluster</option>
+                      {complaintClusters.map((cluster) => (
+                        <option key={cluster.id} value={cluster.id}>
+                          {cluster.name} ({cluster.complaint_count || 0})
+                        </option>
+                      ))}
+                    </select>
+                  </section>
+
+                  {/* Advocate Analytics */}
+                  <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <h3 className="mb-3 text-sm font-bold text-slate-900">Commission Trends</h3>
+                    <ResponsiveContainer width="100%" height={160}>
+                      <LineChart data={trendsData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                        <XAxis dataKey="month" tick={{ fontSize: 9 }} />
+                        <YAxis tick={{ fontSize: 9 }} domain={[0, 0.4]} />
+                        <Tooltip />
+                        <Line
+                          type="monotone"
+                          dataKey="avg_rate"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </section>
+                </aside>
               </div>
-              <div className="card-bento p-0 overflow-hidden">
-                <table className="w-full text-left">
-                  <thead className="bg-gray-50 border-b border-border-dim">
-                    <tr>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Platform</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Date</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Hours</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Gross (Rs)</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Net (Rs)</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border-dim">
-                    {shifts.map((shift) => (
-                      <tr key={shift.id} className="hover:bg-gray-50 transition-colors cursor-pointer group">
-                        <td className="px-6 py-4">
-                          <span className="text-xs font-bold text-text-main">{shift.platform}</span>
-                        </td>
-                        <td className="px-6 py-4 text-xs font-medium text-text-muted">{shift.shift_date}</td>
-                        <td className="px-6 py-4 text-xs font-medium">{shift.hours_worked}h</td>
-                        <td className="px-6 py-4 text-xs font-bold text-text-muted">Rs. {shift.gross_earned}</td>
-                        <td className="px-6 py-4 text-xs font-black">Rs. {shift.net_received}</td>
-                        <td className="px-6 py-4">
-                          <span className={`badge-bento ${
-                            shift.verification_status === 'verified' ? 'bg-brand/10 text-brand' : 
-                            shift.verification_status === 'pending' ? 'bg-yellow-50 text-warning' : 'bg-red-50 text-danger'
-                          }`}>
-                            {shift.verification_status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+
+              {/* Bulk actions toolbar */}
+              {selectedAdvocateIds.length > 0 && (
+                <section className="sticky bottom-3 z-20 rounded-xl border border-slate-900 bg-slate-950 p-3 shadow-xl">
+                  <p className="mb-2 text-sm font-semibold text-white">
+                    {selectedAdvocateIds.length} selected
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
+                    <input
+                      className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100 sm:col-span-2"
+                      placeholder="Assign tags (comma-separated)"
+                      value={bulkTagsInput}
+                      onChange={(e) => setBulkTagsInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="rounded bg-slate-100 px-2 py-2 text-xs font-semibold text-slate-900 disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void assignTagsToSelectedComplaints()}
+                    >
+                      Assign Tags
+                    </button>
+                    <input
+                      className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100"
+                      placeholder="New cluster name"
+                      value={clusterName}
+                      onChange={(e) => setClusterName(e.target.value)}
+                    />
+                    <input
+                      className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100"
+                      placeholder="Primary tag"
+                      value={clusterTag}
+                      onChange={(e) => setClusterTag(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="rounded bg-sky-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void createClusterFromSelected()}
+                    >
+                      Create Cluster
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void addToExistingCluster()}
+                    >
+                      Add To Existing
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-amber-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void setSelectedComplaintStatus('escalated')}
+                    >
+                      Mark Escalated
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-emerald-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void setSelectedComplaintStatus('resolved')}
+                    >
+                      Mark Resolved
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {/* Income distribution chart */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="mb-4 text-sm font-bold text-slate-800">Income Distribution by Zone</h3>
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={distributionData} margin={{ top: 10, right: 10, left: 0, bottom: 50 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                    <XAxis dataKey="zone" tick={{ fontSize: 10 }} interval={0} angle={-45} textAnchor="end" />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Bar dataKey="<20k" fill="#10b981" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="20k-40k" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="40k-60k" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="60k+" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
-            </motion.div>
+            </motion.section>
           )}
 
-          {activeTab === 'grievances' && (
-            <motion.div
-              key="grievances"
-              className="flex items-center justify-center p-20"
+          {/* ── VERIFIER SECTION ── */}
+          {activeSection === 'verifier' && user?.role === 'verifier' && (
+            <motion.section
+              key="verifier"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-4"
             >
-              <div className="text-center">
-                <AlertTriangle className="w-12 h-12 text-warning mx-auto mb-4" />
-                <h2 className="text-xl font-bold mb-2">Grievance Board</h2>
-                <p className="text-sm text-text-muted max-w-xs mx-auto">
-                  Report platform irregularities or deduction discrepancies. Our advocates review escalated cases.
+              <h2 className="text-xl font-bold text-slate-900">Verifier Queue</h2>
+
+              {decisionError && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+                  {decisionError}
                 </p>
-              </div>
-            </motion.div>
-          )}
+              )}
+              {decisionSuccess && (
+                <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                  {decisionSuccess}
+                </p>
+              )}
 
-          {activeTab === 'certificate' && (
-            <motion.div
-              key="certificate"
-              className="card-bento max-w-2xl mx-auto shadow-2xl p-0 border-double border-4 border-gray-100"
-            >
-              <div className="bg-emerald-800 text-white p-12 text-center relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <LayoutDashboard className="w-32 h-32" />
-                </div>
-                <div className="flex flex-col items-center">
-                  <CheckCircle2 className="w-16 h-16 mb-4 text-brand" />
-                  <h1 className="text-3xl font-black uppercase tracking-widest mb-2">FairGig Certified</h1>
-                  <p className="text-emerald-100 text-[10px] tracking-[0.2em] uppercase font-bold">Verified Income Statement</p>
-                </div>
-              </div>
-
-              <div className="mb-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-3">
+              {/* Filters */}
+              <div className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-3">
                 <select
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={verifierPlatformFilter}
                   onChange={(e) => setVerifierPlatformFilter(e.target.value)}
                 >
                   <option value="all">All Platforms</option>
-                  {pendingPlatformOptions.map((platform) => (
-                    <option key={platform} value={platform}>
-                      {platform}
-                    </option>
+                  {pendingPlatformOptions.map((p) => (
+                    <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
-
                 <input
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   placeholder="Filter by worker name"
                   value={verifierWorkerFilter}
                   onChange={(e) => setVerifierWorkerFilter(e.target.value)}
                 />
-
                 <select
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={verifierSortOrder}
@@ -889,11 +2695,13 @@ export default function App() {
               </div>
 
               {Object.keys(pendingByWorker).length === 0 ? (
-                <p className="text-sm text-slate-600">No pending entries match the current filters.</p>
+                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+                  No pending entries match the current filters.
+                </div>
               ) : (
                 <div className="space-y-4">
                   {Object.entries(pendingByWorker).map(([workerLabel, entries]) => (
-                    <div key={workerLabel} className="rounded-xl border border-slate-200 p-3">
+                    <div key={workerLabel} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                       <h3 className="mb-2 text-sm font-semibold text-slate-800">{workerLabel}</h3>
                       <div className="space-y-3">
                         {entries.map((entry) => (
@@ -938,10 +2746,7 @@ export default function App() {
                               placeholder="Add verifier note (optional)"
                               value={decisionNotes[entry.shift_id] || ''}
                               onChange={(e) =>
-                                setDecisionNotes((prev) => ({
-                                  ...prev,
-                                  [entry.shift_id]: e.target.value,
-                                }))
+                                setDecisionNotes((prev) => ({ ...prev, [entry.shift_id]: e.target.value }))
                               }
                             />
 
@@ -950,7 +2755,7 @@ export default function App() {
                                 type="button"
                                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
                                 disabled={decisionLoadingId === entry.shift_id}
-                                onClick={() => handleVerifierDecision(entry.shift_id, 'verified')}
+                                onClick={() => void handleVerifierDecision(entry.shift_id, 'verified')}
                               >
                                 Approve
                               </button>
@@ -958,7 +2763,7 @@ export default function App() {
                                 type="button"
                                 className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
                                 disabled={decisionLoadingId === entry.shift_id}
-                                onClick={() => handleVerifierDecision(entry.shift_id, 'flagged')}
+                                onClick={() => void handleVerifierDecision(entry.shift_id, 'flagged')}
                               >
                                 Flag
                               </button>
@@ -966,7 +2771,7 @@ export default function App() {
                                 type="button"
                                 className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
                                 disabled={decisionLoadingId === entry.shift_id}
-                                onClick={() => handleVerifierDecision(entry.shift_id, 'unverifiable')}
+                                onClick={() => void handleVerifierDecision(entry.shift_id, 'unverifiable')}
                               >
                                 Unverifiable
                               </button>
@@ -977,240 +2782,215 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+              )}
 
-                <div className="text-center">
-                  <p className="text-[10px] text-text-muted italic mb-6">
-                    This document certifies that the individual named above has successfully verified their platform earnings through FairGig protocols as of {new Date().toLocaleDateString()}.
-                  </p>
-                  <button 
-                    onClick={() => window.print()}
-                    className="btn-bento btn-bento-primary no-print"
-                  >
-                    Download Certificate (PDF)
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'analytics' && user?.role === 'advocate' && (
-            <motion.div
-              key="analytics"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="space-y-6"
-            >
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-black">Advocate Analytics Panel</h2>
-                <div className="text-xs font-bold text-text-muted uppercase tracking-widest bg-gray-100 px-3 py-1 rounded-full border border-border-dim">
-                  Live Market View
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Income Distribution */}
-                <div className="card-bento col-span-2">
-                  <div className="card-title-bento mb-6">Income Distribution by Zone</div>
-                  <div className="h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={distributionData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                        <XAxis dataKey="zone" tick={{ fontSize: 10, fontWeight: 700 }} interval={0} angle={-45} textAnchor="end" />
-                        <YAxis tick={{ fontSize: 10, fontWeight: 700 }} />
-                        <Tooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }} />
-                        <Bar dataKey="<20k" fill="#10b981" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="20k-40k" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="40k-60k" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="60k+" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Commission Trends */}
-                <div className="card-bento md:col-span-1">
-                  <div className="card-title-bento mb-4">Commission Trends (Last 6M)</div>
-                  <div className="h-[240px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={trendsData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                        <XAxis dataKey="month" hide />
-                        <YAxis tick={{ fontSize: 8 }} domain={[0, 0.4]} />
-                        <Tooltip />
-                        <Line type="monotone" dataKey="avg_rate" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <p className="text-[10px] text-text-muted mt-2 uppercase font-bold text-center">Average multi-platform commission rate</p>
-                </div>
-
-                {/* Top Complaints */}
-                <div className="card-bento md:col-span-1">
-                   <div className="card-title-bento mb-4">Top Grievance Categories</div>
-                   <div className="h-[240px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart layout="vertical" data={topComplaintsData} margin={{ left: 20 }}>
-                        <XAxis type="number" hide />
-                        <YAxis dataKey="category" type="category" tick={{ fontSize: 9, fontWeight: 700 }} width={80} />
-                        <Tooltip />
-                        <Bar dataKey="count" fill="#ef4444" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Vulnerability Table */}
-                <div className="card-bento col-span-2">
-                  <div className="card-title-bento mb-4 text-danger flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" />
-                    Critical Vulnerability Flags (MoM Income Drop &gt; 20%)
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-border-dim text-[10px] font-black uppercase text-text-muted">
-                          <th className="py-2">Worker Name</th>
-                          <th className="py-2">Zone</th>
-                          <th className="py-2 text-right">Prev Month</th>
-                          <th className="py-2 text-right">Current Month</th>
-                          <th className="py-2 text-center">Severity</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border-dim">
-                        {vulnerabilityData.map(v => (
-                          <tr key={v.id} className="text-xs">
-                            <td className="py-3 font-bold">{v.name}</td>
-                            <td className="py-3 text-text-muted">{v.city_zone}</td>
-                            <td className="py-3 text-right">Rs. {v.previous_month}</td>
-                            <td className="py-3 text-right text-danger font-black">Rs. {v.current_month}</td>
-                            <td className="py-3 text-center">
-                              <span className="badge-bento bg-red-100 text-red-600 border-red-200">High Risk</span>
-                            </td>
-                          </tr>
+              {/* My reviewed shifts */}
+              {myReviewedShifts.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h3 className="mb-3 text-sm font-bold text-slate-800">My Reviewed Shifts</h3>
+                  <div className="space-y-3">
+                    {Object.entries(myReviewedByWorker).map(([workerLabel, reviewed]) => (
+                      <div key={workerLabel} className="rounded-xl border border-slate-100 p-2">
+                        <p className="mb-1 text-xs font-semibold text-slate-700">{workerLabel}</p>
+                        {reviewed.map((shift) => (
+                          <div key={shift.id} className="flex flex-wrap items-center gap-3 border-b border-slate-100 py-1 text-xs text-slate-600 last:border-0">
+                            <span>{shift.shift_date}</span>
+                            <span>{shift.platform}</span>
+                            <span>PKR {shift.net_received}</span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 font-semibold capitalize ${
+                                shift.verification_status === 'verified'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : shift.verification_status === 'flagged'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {shift.verification_status}
+                            </span>
+                            {shift.verifier_note && (
+                              <span className="italic text-slate-400">{shift.verifier_note}</span>
+                            )}
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-
-              <form onSubmit={submitCommunityComplaint} className="space-y-3">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <select
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={communityForm.platform}
-                    onChange={(e) => setCommunityForm((prev) => ({ ...prev, platform: e.target.value }))}
-                  >
-                    {platforms.map((platform) => (
-                      <option key={platform} value={platform}>
-                        {platform}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={communityForm.category}
-                    onChange={(e) => setCommunityForm((prev) => ({ ...prev, category: e.target.value }))}
-                  >
-                    <option value="commission_hike">commission_hike</option>
-                    <option value="account_deactivation">account_deactivation</option>
-                    <option value="payment_delay">payment_delay</option>
-                    <option value="unfair_rating">unfair_rating</option>
-                    <option value="data_privacy">data_privacy</option>
-                    <option value="other">other</option>
-                  </select>
-                </div>
-
-                <textarea
-                  className="min-h-28 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Describe complaint (minimum 20 chars)"
-                  value={communityForm.description}
-                  onChange={(e) => setCommunityForm((prev) => ({ ...prev, description: e.target.value }))}
-                />
-
-                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={communityForm.is_anonymous}
-                    onChange={(e) => setCommunityForm((prev) => ({ ...prev, is_anonymous: e.target.checked }))}
-                  />
-                  Post anonymously
-                </label>
-
-                {communityError && <p className="text-sm font-medium text-red-600">{communityError}</p>}
-
-                <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white" type="submit">
-                  Post Complaint
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {showMyComplaintsModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-            onClick={() => setShowMyComplaintsModal(false)}
-          >
-            <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-900">My Previous Complaints</h3>
-                <button
-                  type="button"
-                  className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
-                  onClick={() => setShowMyComplaintsModal(false)}
-                >
-                  Close
-                </button>
-              </div>
-
-              {myComplaintsError && <p className="mb-3 text-sm font-medium text-red-600">{myComplaintsError}</p>}
-
-              {myComplaintsLoading ? (
-                <p className="text-sm text-slate-600">Loading your complaints...</p>
-              ) : myComplaints.length === 0 ? (
-                <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">You have not posted any complaints yet.</p>
-              ) : (
-                <div className="max-h-[65vh] space-y-3 overflow-auto pr-1">
-                  {myComplaints.map((item) => (
-                    <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">{item.platform}</span>
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">{item.category}</span>
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold capitalize text-emerald-800">{item.status}</span>
-                        <span>{item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown date'}</span>
                       </div>
-                      <p className="mt-2 text-sm text-slate-800">{item.description}</p>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
-        )}
+            </motion.section>
+          )}
 
-        {previewScreenshotUrl && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-            onClick={() => setPreviewScreenshotUrl(null)}
-          >
-            <div className="max-h-[90vh] max-w-5xl overflow-hidden rounded-xl bg-white" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-                <p className="text-sm font-semibold text-slate-800">Screenshot Preview</p>
-                <button
-                  type="button"
-                  className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
-                  onClick={() => setPreviewScreenshotUrl(null)}
-                >
-                  Close
-                </button>
-              </div>
-              <img src={previewScreenshotUrl} alt="Screenshot preview" className="max-h-[80vh] w-full object-contain" />
-            </div>
-          </div>
-        )}
+          {/* Role mismatch fallback */}
+          {((activeSection === 'earnings' && user?.role !== 'worker') ||
+            (activeSection === 'verifier' && user?.role !== 'verifier') ||
+            (activeSection === 'advocate' && user?.role !== 'advocate')) && (
+            <motion.div
+              key="role-mismatch"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900"
+            >
+              This section is not available for your role ({user?.role}).
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
+
+      {/* ── Create Complaint Modal ── */}
+      {showCreateComplaintModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowCreateComplaintModal(false)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">New Complaint</h3>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                onClick={() => setShowCreateComplaintModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            <form onSubmit={submitCommunityComplaint} className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <select
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={communityForm.platform}
+                  onChange={(e) => setCommunityForm((prev) => ({ ...prev, platform: e.target.value }))}
+                >
+                  {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <select
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={communityForm.category}
+                  onChange={(e) => setCommunityForm((prev) => ({ ...prev, category: e.target.value }))}
+                >
+                  <option value="commission_hike">commission_hike</option>
+                  <option value="account_deactivation">account_deactivation</option>
+                  <option value="payment_delay">payment_delay</option>
+                  <option value="unfair_rating">unfair_rating</option>
+                  <option value="data_privacy">data_privacy</option>
+                  <option value="other">other</option>
+                </select>
+              </div>
+              <textarea
+                className="min-h-28 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                placeholder="Describe complaint (minimum 20 characters)"
+                value={communityForm.description}
+                onChange={(e) => setCommunityForm((prev) => ({ ...prev, description: e.target.value }))}
+              />
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={communityForm.is_anonymous}
+                  onChange={(e) => setCommunityForm((prev) => ({ ...prev, is_anonymous: e.target.checked }))}
+                />
+                Post anonymously
+              </label>
+              {communityError && (
+                <p className="text-sm font-medium text-red-600">{communityError}</p>
+              )}
+              <button
+                type="submit"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Post Complaint
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── My Complaints Modal ── */}
+      {showMyComplaintsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowMyComplaintsModal(false)}
+        >
+          <div
+            className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">My Previous Complaints</h3>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                onClick={() => setShowMyComplaintsModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            {myComplaintsError && (
+              <p className="mb-3 text-sm font-medium text-red-600">{myComplaintsError}</p>
+            )}
+            {myComplaintsLoading ? (
+              <p className="text-sm text-slate-600">Loading your complaints…</p>
+            ) : myComplaints.length === 0 ? (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                You have not posted any complaints yet.
+              </p>
+            ) : (
+              <div className="max-h-[65vh] space-y-3 overflow-auto pr-1">
+                {myComplaints.map((item) => (
+                  <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                        {item.platform}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                        {item.category}
+                      </span>
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold capitalize text-emerald-800">
+                        {item.status}
+                      </span>
+                      <span>
+                        {item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown date'}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-800">{item.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Screenshot Preview Modal ── */}
+      {previewScreenshotUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPreviewScreenshotUrl(null)}
+        >
+          <div
+            className="max-h-[90vh] max-w-5xl overflow-hidden rounded-xl bg-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+              <p className="text-sm font-semibold text-slate-800">Screenshot Preview</p>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                onClick={() => setPreviewScreenshotUrl(null)}
+              >
+                Close
+              </button>
+            </div>
+            <img
+              src={previewScreenshotUrl}
+              alt="Screenshot preview"
+              className="max-h-[80vh] w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
     </main>
   );
 }
