@@ -40,6 +40,9 @@ type Complaint = {
   created_at: string;
 };
 
+type ChartPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+type BucketUnit = 'day' | 'week' | 'month' | 'year';
+
 function asDate(dateLike: string) {
   const d = new Date(dateLike);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -55,37 +58,107 @@ function formatDateLong(dateLike: string) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).format(d);
 }
 
-function formatRelativeTime(dateLike: string) {
-  const d = asDate(dateLike);
-  if (!d) return dateLike;
+function cutoffForPeriod(period: ChartPeriod) {
+  const now = new Date();
+  const cutoff = new Date(now);
+  if (period === 'daily') cutoff.setDate(cutoff.getDate() - 14);
+  if (period === 'weekly') cutoff.setDate(cutoff.getDate() - 84);
+  if (period === 'monthly') cutoff.setMonth(cutoff.getMonth() - 12);
+  if (period === 'yearly') cutoff.setFullYear(cutoff.getFullYear() - 5);
+  return { now, cutoff };
+}
 
-  const now = Date.now();
-  const diffMs = d.getTime() - now;
-  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+function bucketUnitFromPeriod(period: ChartPeriod): BucketUnit {
+  if (period === 'daily') return 'day';
+  if (period === 'weekly') return 'week';
+  if (period === 'monthly') return 'month';
+  return 'year';
+}
 
-  const absSec = Math.abs(Math.round(diffMs / 1000));
-  if (absSec < 60) return rtf.format(Math.round(diffMs / 1000), 'second');
+function getWeekStart(date: Date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = (day + 6) % 7;
+  d.setDate(d.getDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
-  const absMin = Math.abs(Math.round(diffMs / 60000));
-  if (absMin < 60) return rtf.format(Math.round(diffMs / 60000), 'minute');
+function bucketKeyForDate(date: Date, unit: BucketUnit) {
+  if (unit === 'day') {
+    return date.toISOString().slice(0, 10);
+  }
+  if (unit === 'week') {
+    return getWeekStart(date).toISOString().slice(0, 10);
+  }
+  if (unit === 'month') {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return String(date.getFullYear());
+}
 
-  const absHr = Math.abs(Math.round(diffMs / 3600000));
-  if (absHr < 24) return rtf.format(Math.round(diffMs / 3600000), 'hour');
+function bucketLabelFromKey(key: string, unit: BucketUnit) {
+  if (unit === 'day') {
+    const d = asDate(`${key}T00:00:00`);
+    return d ? new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit' }).format(d) : key;
+  }
+  if (unit === 'week') {
+    const d = asDate(`${key}T00:00:00`);
+    if (!d) return key;
+    return `Wk ${new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit' }).format(d)}`;
+  }
+  if (unit === 'month') {
+    const d = asDate(`${key}-01T00:00:00`);
+    return d ? new Intl.DateTimeFormat('en-US', { month: 'short', year: '2-digit' }).format(d) : key;
+  }
+  return key;
+}
 
-  const absDay = Math.abs(Math.round(diffMs / 86400000));
-  return rtf.format(Math.round(diffMs / 86400000), 'day');
+function filterShiftsByPeriod(input: Shift[], period: ChartPeriod) {
+  const { now, cutoff } = cutoffForPeriod(period);
+  return input.filter((s) => {
+    const d = asDate(s.shift_date);
+    if (!d) return false;
+    return d >= cutoff && d <= now;
+  });
+}
+
+function PeriodSelect({ value, onChange, dark = false }: { value: ChartPeriod; onChange: (next: ChartPeriod) => void; dark?: boolean }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as ChartPeriod)}
+      className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold outline-none transition ${
+        dark
+          ? 'border-slate-700 bg-slate-900 text-slate-200 focus:border-slate-500'
+          : 'border-slate-200 bg-white text-slate-700 focus:border-sky-300'
+      }`}
+    >
+      <option value="daily">Daily</option>
+      <option value="weekly">Weekly</option>
+      <option value="monthly">Monthly</option>
+      <option value="yearly">Yearly</option>
+    </select>
+  );
 }
 
 export default function WorkerDashboardPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [performancePeriod, setPerformancePeriod] = useState<ChartPeriod>('daily');
+  const [hourlyPeriod, setHourlyPeriod] = useState<ChartPeriod>('daily');
+  const [commissionPeriod, setCommissionPeriod] = useState<ChartPeriod>('daily');
+  const [medianPeriod, setMedianPeriod] = useState<ChartPeriod>('daily');
+  const [distributionPeriod, setDistributionPeriod] = useState<ChartPeriod>('daily');
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [medianHourly, setMedianHourly] = useState(0);
 
   const [context, setContext] = useState({ workerId: '', zone: 'N/A', category: 'N/A' });
+  const [hourlyPlatform, setHourlyPlatform] = useState('all');
+  const [commissionPlatform, setCommissionPlatform] = useState('all');
 
   async function loadDashboard() {
     const workerId = localStorage.getItem('fairgig_user_id') || '';
@@ -171,42 +244,128 @@ export default function WorkerDashboardPage() {
     };
   }, [shifts]);
 
+  const monthSummary = useMemo(() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const prevDate = new Date(currentYear, currentMonth - 1, 1);
+    const prevYear = prevDate.getFullYear();
+    const prevMonth = prevDate.getMonth();
+
+    let currentNet = 0;
+    let currentHours = 0;
+    let prevNet = 0;
+    let prevHours = 0;
+
+    for (const s of shifts) {
+      const d = asDate(s.shift_date);
+      if (!d) continue;
+      const net = Number(s.net_received || 0);
+      const hrs = Number(s.hours_worked || 0);
+      if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
+        currentNet += net;
+        currentHours += hrs;
+      }
+      if (d.getFullYear() === prevYear && d.getMonth() === prevMonth) {
+        prevNet += net;
+        prevHours += hrs;
+      }
+    }
+
+    const currentHourly = currentHours > 0 ? currentNet / currentHours : 0;
+    const prevHourly = prevHours > 0 ? prevNet / prevHours : 0;
+
+    const netGrowth = prevNet > 0 ? ((currentNet - prevNet) / prevNet) * 100 : 0;
+    const hourlyGrowth = prevHourly > 0 ? ((currentHourly - prevHourly) / prevHourly) * 100 : 0;
+
+    return {
+      monthLabel: new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(now),
+      currentNet,
+      currentHourly,
+      netGrowth,
+      hourlyGrowth,
+    };
+  }, [shifts]);
+
   const sortedShifts = useMemo(() => {
     return [...shifts].sort((a, b) => new Date(b.shift_date).getTime() - new Date(a.shift_date).getTime());
   }, [shifts]);
 
+  const performanceShifts = useMemo(() => filterShiftsByPeriod(sortedShifts, performancePeriod), [sortedShifts, performancePeriod]);
+  const hourlyShifts = useMemo(() => filterShiftsByPeriod(sortedShifts, hourlyPeriod), [sortedShifts, hourlyPeriod]);
+  const commissionShifts = useMemo(() => filterShiftsByPeriod(sortedShifts, commissionPeriod), [sortedShifts, commissionPeriod]);
+  const medianShifts = useMemo(() => filterShiftsByPeriod(sortedShifts, medianPeriod), [sortedShifts, medianPeriod]);
+  const distributionShifts = useMemo(() => filterShiftsByPeriod(sortedShifts, distributionPeriod), [sortedShifts, distributionPeriod]);
+
+  const platformOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of shifts) {
+      const p = (s.platform || '').toLowerCase().trim();
+      if (p) set.add(p);
+    }
+    return ['all', ...Array.from(set)];
+  }, [shifts]);
+
+  const hourlyPlatformShifts = useMemo(() => {
+    if (hourlyPlatform === 'all') return hourlyShifts;
+    return hourlyShifts.filter((s) => (s.platform || '').toLowerCase() === hourlyPlatform);
+  }, [hourlyShifts, hourlyPlatform]);
+
+  const commissionPlatformShifts = useMemo(() => {
+    if (commissionPlatform === 'all') return commissionShifts;
+    return commissionShifts.filter((s) => (s.platform || '').toLowerCase() === commissionPlatform);
+  }, [commissionShifts, commissionPlatform]);
+
+  const topPlatform = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const s of shifts) {
+      const p = (s.platform || 'other').toLowerCase();
+      totals.set(p, (totals.get(p) || 0) + Number(s.net_received || 0));
+    }
+    let best = 'N/A';
+    let bestValue = 0;
+    for (const [k, v] of totals.entries()) {
+      if (v > bestValue) {
+        best = k;
+        bestValue = v;
+      }
+    }
+    return { name: best.toUpperCase(), value: bestValue };
+  }, [shifts]);
+
   const performanceOption: EChartsOption = useMemo(() => {
-    const daily = new Map<string, number>();
+    const bucketed = new Map<string, number>();
+    const unit = bucketUnitFromPeriod(performancePeriod);
     const anomalyMap = new Map<string, AnomalyItem[]>();
     
-    // Aggregate shifts by day (simplification for the visual chart)
-    for (const s of sortedShifts) {
+    for (const s of performanceShifts) {
       const dOptions = asDate(s.shift_date);
       if (!dOptions) continue;
-      const dStr = formatShortDate(dOptions);
-      daily.set(dStr, (daily.get(dStr) || 0) + Number(s.net_received || 0));
+      const key = bucketKeyForDate(dOptions, unit);
+      bucketed.set(key, (bucketed.get(key) || 0) + Number(s.net_received || 0));
     }
 
     for (const a of anomalies) {
       const ad = asDate(a.affected_date);
       if (!ad) continue;
-      const dStr = formatShortDate(ad);
-      const list = anomalyMap.get(dStr) || [];
+      const key = bucketKeyForDate(ad, unit);
+      const list = anomalyMap.get(key) || [];
       list.push(a);
-      anomalyMap.set(dStr, list);
+      anomalyMap.set(key, list);
     }
 
-    const categories = Array.from(daily.keys()).reverse(); // Older to newer
-    const netData = categories.map(c => daily.get(c) || 0);
+    const keys = Array.from(bucketed.keys()).sort((a, b) => a.localeCompare(b));
+    const labels = keys.map((k) => bucketLabelFromKey(k, unit));
+    const netData = keys.map((k) => bucketed.get(k) || 0);
     
-    const anomalyPoints = categories.map((c, idx) => {
-      const list = anomalyMap.get(c);
+    const anomalyPoints = keys.map((k, idx) => {
+      const list = anomalyMap.get(k);
       if (list && list.length > 0) {
         return {
-          value: [c, netData[idx]],
+          value: [labels[idx], netData[idx]],
           symbolSize: 14,
           itemStyle: { color: '#dc2626', shadowBlur: 10, shadowColor: 'rgba(220,38,38,0.8)' },
-          alertDetails: list
+          alertDetails: list,
         };
       }
       return null;
@@ -217,9 +376,8 @@ export default function WorkerDashboardPage() {
         trigger: 'axis',
         formatter: (params: any) => {
           const p = params[0];
-          let html = `<b>${p.name}</b><br/>Earnings: PKR ${p.value.toFixed(2)}`;
-          // Check if there's an anomaly match
-          const match = anomalyPoints.find(ap => ap?.value[0] === p.name);
+         let html = `<b>${p.name}</b><br/>Earnings: PKR ${Number(p.value || 0).toFixed(2)}`;
+         const match = anomalyPoints.find((ap) => ap?.value[0] === p.name);
           if (match) {
              html += `<hr style="margin:4px 0;"/><span style="color:#dc2626;font-weight:bold;">Anomalies Detected:</span><br/>`;
              match.alertDetails.forEach((a: any) => {
@@ -233,13 +391,15 @@ export default function WorkerDashboardPage() {
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        data: categories,
-        axisLine: { show: false },
+        data: labels,
+        axisLine: { lineStyle: { color: '#334155' } },
         axisTick: { show: false },
+        axisLabel: { color: '#94a3b8' },
       },
       yAxis: {
         type: 'value',
-        splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } }
+        axisLabel: { color: '#94a3b8' },
+        splitLine: { lineStyle: { type: 'dashed', color: 'rgba(148,163,184,0.25)' } },
       },
       series: [
         {
@@ -252,12 +412,12 @@ export default function WorkerDashboardPage() {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(59, 130, 246, 0.4)' }, // Blue/indigo transition
+                { offset: 0, color: 'rgba(56, 189, 248, 0.45)' },
                 { offset: 1, color: 'rgba(59, 130, 246, 0.0)' }
               ]
             }
           },
-          lineStyle: { width: 3, color: '#3b82f6' },
+          lineStyle: { width: 3, color: '#38bdf8' },
           data: netData
         },
         {
@@ -273,7 +433,221 @@ export default function WorkerDashboardPage() {
         }
       ]
     };
-  }, [sortedShifts, anomalies]);
+  }, [performanceShifts, anomalies, performancePeriod]);
+
+  const hourlyRateOption: EChartsOption = useMemo(() => {
+    const unit = bucketUnitFromPeriod(hourlyPeriod);
+    const byBucket = new Map<string, { net: number; hours: number }>();
+    for (const s of hourlyPlatformShifts) {
+      const d = asDate(s.shift_date);
+      if (!d) continue;
+      const key = bucketKeyForDate(d, unit);
+      const existing = byBucket.get(key) || { net: 0, hours: 0 };
+      existing.net += Number(s.net_received || 0);
+      existing.hours += Number(s.hours_worked || 0);
+      byBucket.set(key, existing);
+    }
+
+    const keys = Array.from(byBucket.keys()).sort((a, b) => a.localeCompare(b));
+    const labels = keys.map((k) => bucketLabelFromKey(k, unit));
+    const rates = keys.map((k) => {
+      const row = byBucket.get(k);
+      if (!row || row.hours <= 0) return 0;
+      return Number((row.net / row.hours).toFixed(2));
+    });
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params?.[0];
+          if (!p) return '';
+          return `<b>${p.name}</b><br/>Effective hourly: PKR ${Number(p.value || 0).toFixed(2)}`;
+        },
+      },
+      grid: { left: 40, right: 12, top: 16, bottom: 26 },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: { color: '#64748b' },
+        axisLine: { lineStyle: { color: '#cbd5e1' } },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { color: '#64748b' },
+        splitLine: { lineStyle: { color: '#e2e8f0' } },
+      },
+      series: [
+        {
+          type: 'line',
+          smooth: true,
+          symbolSize: 6,
+          lineStyle: { width: 3, color: '#0891b2' },
+          itemStyle: { color: '#0891b2' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(8,145,178,0.25)' },
+                { offset: 1, color: 'rgba(8,145,178,0.03)' },
+              ],
+            },
+          },
+          data: rates,
+        },
+      ],
+    };
+  }, [hourlyPlatformShifts, hourlyPeriod]);
+
+  const commissionTrackerOption: EChartsOption = useMemo(() => {
+    const unit = bucketUnitFromPeriod(commissionPeriod);
+    const byBucket = new Map<string, { gross: number; deductions: number }>();
+    for (const s of commissionPlatformShifts) {
+      const d = asDate(s.shift_date);
+      if (!d) continue;
+      const key = bucketKeyForDate(d, unit);
+      const item = byBucket.get(key) || { gross: 0, deductions: 0 };
+      item.gross += Number(s.gross_earned || 0);
+      item.deductions += Number(s.platform_deductions || 0);
+      byBucket.set(key, item);
+    }
+
+    const keys = Array.from(byBucket.keys()).sort((a, b) => a.localeCompare(b));
+    const labels = keys.map((k) => bucketLabelFromKey(k, unit));
+    const rates = keys.map((k) => {
+      const item = byBucket.get(k);
+      if (!item || item.gross <= 0) return 0;
+      return Number(((item.deductions / item.gross) * 100).toFixed(2));
+    });
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params?.[0];
+          if (!p) return '';
+          return `<b>${String(p.name).toUpperCase()}</b><br/>Commission: ${Number(p.value || 0).toFixed(2)}%`;
+        },
+      },
+      grid: { left: 38, right: 14, top: 16, bottom: 30 },
+      backgroundColor: 'transparent',
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: { color: '#94a3b8' },
+        axisTick: { show: false },
+        axisLine: { lineStyle: { color: '#334155' } },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { color: '#94a3b8', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
+      },
+      series: [
+        {
+          name: 'Commission %',
+          type: 'line',
+          smooth: false,
+          step: 'middle',
+          symbol: 'circle',
+          symbolSize: 8,
+          lineStyle: { width: 3, color: '#38bdf8' },
+          itemStyle: { color: '#38bdf8' },
+          data: rates,
+        },
+      ],
+    };
+  }, [commissionPlatformShifts, commissionPeriod]);
+
+  const cityMedianOption: EChartsOption = useMemo(() => {
+    const totalNet = medianShifts.reduce((sum, s) => sum + Number(s.net_received || 0), 0);
+    const totalHours = medianShifts.reduce((sum, s) => sum + Number(s.hours_worked || 0), 0);
+    const workerHourly = totalHours > 0 ? Number((totalNet / totalHours).toFixed(2)) : 0;
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const lines = (params || []).map((p: any) => `${p.marker}${p.seriesName}: PKR ${Number(p.value || 0).toFixed(2)}`);
+          return lines.join('<br/>');
+        },
+      },
+      grid: { left: 38, right: 12, top: 24, bottom: 24 },
+      backgroundColor: 'transparent',
+      xAxis: {
+        type: 'category',
+        data: ['You', 'City Median'],
+        axisLabel: { color: '#94a3b8' },
+        axisLine: { lineStyle: { color: '#334155' } },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { color: '#94a3b8' },
+        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
+      },
+      series: [
+        {
+          name: 'Mine',
+          type: 'bar',
+          barMaxWidth: 38,
+          itemStyle: { color: '#22c55e', borderRadius: [8, 8, 0, 0] },
+          data: [workerHourly, 0],
+        },
+        {
+          name: 'City Median',
+          type: 'bar',
+          barMaxWidth: 38,
+          itemStyle: { color: '#38bdf8', borderRadius: [8, 8, 0, 0] },
+          data: [0, medianHourly || 0],
+        },
+      ],
+    };
+  }, [medianShifts, medianHourly]);
+
+  const platformDistributionOption: EChartsOption = useMemo(() => {
+    const platformNet = new Map<string, number>();
+    for (const s of distributionShifts) {
+      const key = (s.platform || 'other').toLowerCase();
+      platformNet.set(key, (platformNet.get(key) || 0) + Number(s.net_received || 0));
+    }
+
+    const data = Array.from(platformNet.entries()).map(([name, value]) => ({
+      name: name.toUpperCase(),
+      value: Number(value.toFixed(2)),
+    }));
+
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => `${params.name}<br/>Net: PKR ${Number(params.value || 0).toLocaleString()} (${Number(params.percent || 0).toFixed(1)}%)`,
+      },
+      legend: {
+        bottom: 0,
+        textStyle: { color: '#64748b', fontSize: 11 },
+      },
+      series: [
+        {
+          name: 'Platform Distribution',
+          type: 'pie',
+          radius: ['38%', '68%'],
+          center: ['50%', '45%'],
+          avoidLabelOverlap: true,
+          itemStyle: { borderRadius: 8, borderColor: '#ffffff', borderWidth: 2 },
+          label: {
+            show: true,
+            color: '#334155',
+            formatter: '{d}%',
+            fontSize: 11,
+          },
+          data,
+        },
+      ],
+    };
+  }, [distributionShifts]);
 
   if (!isMounted) {
     return <div className="p-8 text-center text-slate-500 font-medium animate-pulse">Loading dashboard...</div>;
@@ -284,224 +658,146 @@ export default function WorkerDashboardPage() {
   }
 
   return (
-    <div className="flex flex-col xl:flex-row gap-6 bg-slate-50 min-h-screen">
-      {/* Main Content Area */}
-      <div className="flex-1 space-y-6">
-        
-        {/* Header / Utility row */}
-        <div className="flex justify-between items-center bg-white rounded-xl p-4 shadow-sm border border-slate-100">
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">Dashboard Overview</h1>
-            <p className="text-sm text-slate-500">Welcome back! Here is your latest performance.</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={loadDashboard} className="px-4 py-2 bg-indigo-50 text-indigo-600 font-medium rounded-lg text-sm hover:bg-indigo-100 transition">
-              Refresh
-            </button>
-            <button className="px-4 py-2 bg-slate-900 text-white font-medium rounded-lg text-sm hover:bg-slate-800 transition">
-              Export Report
-            </button>
-          </div>
-        </div>
-
-        {error && <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm font-medium border border-red-100">{error}</div>}
-        
-        {anomalies.length > 0 && (
-          <div className="flex items-center gap-3 p-3 bg-red-50 text-red-800 rounded-lg border border-red-100">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-            </span>
-            <p className="text-sm font-semibold">Heads up! We detected {anomalies.length} anomal{anomalies.length > 1 ? 'ies' : 'y'} in your recent activity.</p>
+    <div className="min-h-screen bg-[radial-gradient(1200px_500px_at_20%_-10%,rgba(14,165,233,0.10),transparent),radial-gradient(1000px_450px_at_90%_0%,rgba(16,185,129,0.12),transparent),#f8fafc] p-4 sm:p-6">
+      <div className="mx-auto grid max-w-[1400px] grid-cols-12 gap-4 sm:gap-5">
+        {error && (
+          <div className="col-span-12 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {error}
           </div>
         )}
 
-        {/* KPI Grid (4 Columns) */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="p-5 bg-white rounded-xl shadow-sm border border-slate-100">
-            <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Total Net</div>
-            <div className="text-2xl font-bold text-slate-800">PKR {kpis.net.toLocaleString()}</div>
+        {anomalies.length > 0 && (
+          <div className="col-span-12 flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-800">
+            <span className="relative flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500"></span>
+            </span>
+            <p className="text-sm font-semibold">{anomalies.length} red-flag anomal{anomalies.length > 1 ? 'ies' : 'y'} detected in the selected period.</p>
           </div>
-          <div className="p-5 bg-white rounded-xl shadow-sm border border-slate-100">
-            <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Hourly Average</div>
-            <div className="text-2xl font-bold text-slate-800">PKR {Math.round(kpis.hourly).toLocaleString()}</div>
+        )}
+
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Net</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Month: {monthSummary.monthLabel}</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">PKR {Math.round(monthSummary.currentNet).toLocaleString()}</p>
+          <p className={`mt-2 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${monthSummary.netGrowth >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+            {monthSummary.netGrowth >= 0 ? '+' : ''}{monthSummary.netGrowth.toFixed(1)}% vs previous month
+          </p>
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Hourly Average</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Month: {monthSummary.monthLabel}</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">PKR {Math.round(monthSummary.currentHourly).toLocaleString()}</p>
+          <p className={`mt-2 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${monthSummary.hourlyGrowth >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+            {monthSummary.hourlyGrowth >= 0 ? '+' : ''}{monthSummary.hourlyGrowth.toFixed(1)}% vs previous month
+          </p>
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Top Earning Platform</p>
+          <p className="mt-2 text-3xl font-bold text-white">{topPlatform.name}</p>
+          <p className="mt-2 text-xs font-semibold text-sky-300">PKR {Math.round(topPlatform.value).toLocaleString()} earned</p>
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Complaints</p>
+          <p className="mt-2 text-3xl font-bold text-white">{complaints.filter((c) => c.status !== 'resolved').length}</p>
+          <p className="mt-2 text-xs font-semibold text-slate-300">Open cases currently in pipeline</p>
+        </div>
+
+        <div className="col-span-12 lg:col-span-8 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-xl shadow-slate-900/20">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-white">Performance (Earnings & Alerts)</h2>
+              <p className="text-xs text-slate-400">Red markers show anomaly dates.</p>
+            </div>
+            <PeriodSelect value={performancePeriod} onChange={setPerformancePeriod} dark />
           </div>
-          <div className="p-5 bg-white rounded-xl shadow-sm border border-slate-100">
-            <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Verified Shifts</div>
-            <div className="text-2xl font-bold text-slate-800">{kpis.verified} / {kpis.shifts}</div>
-          </div>
-          <div className="p-5 bg-white rounded-xl shadow-sm border border-slate-100">
-            <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Active Complaints</div>
-            <div className="text-2xl font-bold text-slate-800">{complaints.filter(c => c.status !== 'resolved').length}</div>
+          <div className="h-72">
+            {performanceShifts.length > 0 ? (
+              <ReactECharts option={performanceOption} style={{ height: '100%', width: '100%' }} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">No performance data in selected range.</div>
+            )}
           </div>
         </div>
 
-        {/* Performance Chart Area */}
-        <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-base font-bold text-slate-800">Performance (Earnings & Alerts)</h2>
-            <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
-              <button className="px-3 py-1 bg-white rounded shadow-sm text-slate-800">30 Days</button>
-              <button className="px-3 py-1 text-slate-500 hover:text-slate-700">6 Months</button>
+        <div className="col-span-12 lg:col-span-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900">Distribution By Platform</h2>
+            <PeriodSelect value={distributionPeriod} onChange={setDistributionPeriod} />
+          </div>
+          <p className="mb-3 text-xs text-slate-500">Net earnings split by platform for selected period.</p>
+          <div className="h-72">
+            {distributionShifts.length > 0 ? (
+              <ReactECharts option={platformDistributionOption} style={{ height: '100%', width: '100%' }} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">No platform distribution data yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="col-span-12 lg:col-span-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900">Effective Hourly Rate Over Time</h2>
+            <div className="flex items-center gap-2">
+              <select
+                value={hourlyPlatform}
+                onChange={(e) => setHourlyPlatform(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none"
+              >
+                {platformOptions.map((p) => (
+                  <option key={`hourly-${p}`} value={p}>{p === 'all' ? 'All Platforms' : p.toUpperCase()}</option>
+                ))}
+              </select>
+              <PeriodSelect value={hourlyPeriod} onChange={setHourlyPeriod} />
             </div>
           </div>
           <div className="h-64">
-             {shifts.length > 0 ? (
-               <ReactECharts option={performanceOption} style={{ height: '100%', width: '100%' }} />
-             ) : (
-               <div className="h-full flex items-center justify-center text-slate-400 text-sm">No performance data yet</div>
-             )}
-          </div>
-        </div>
-
-        {/* Current Tasks / Complaints List */}
-        <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-          <h2 className="text-base font-bold text-slate-800 mb-4">Current Tasks (Grievances)</h2>
-          {complaints.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-500 bg-slate-50">
-                    <th className="py-3 px-4 font-semibold rounded-tl-lg">Complaint ID</th>
-                    <th className="py-3 px-4 font-semibold">Category</th>
-                    <th className="py-3 px-4 font-semibold hidden md:table-cell">Platform</th>
-                    <th className="py-3 px-4 font-semibold hidden lg:table-cell">Date</th>
-                    <th className="py-3 px-4 font-semibold rounded-tr-lg">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {complaints.slice(0, 5).map(c => (
-                    <tr key={c.id} className="hover:bg-slate-50/50 transition">
-                      <td className="py-3 px-4 font-medium text-slate-900">{c.id.split('-')[0].toUpperCase()}</td>
-                      <td className="py-3 px-4 capitalize">{c.category.replace(/_/g, ' ')}</td>
-                      <td className="py-3 px-4 hidden md:table-cell capitalize flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${c.platform === 'uber' ? 'bg-black' : c.platform === 'foodpanda' ? 'bg-pink-500' : 'bg-emerald-500'}`}></span>
-                        {c.platform}
-                      </td>
-                      <td className="py-3 px-4 text-slate-500 hidden lg:table-cell">
-                        {formatDateLong(c.created_at)}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold 
-                          ${c.status === 'resolved' ? 'bg-emerald-100 text-emerald-700' : 
-                            c.status === 'in_progress' ? 'bg-amber-100 text-amber-700' : 
-                            'bg-blue-100 text-blue-700'}`}>
-                          {c.status.replace(/_/g, ' ')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {complaints.length > 5 && (
-                <div className="pt-4 text-center">
-                  <button className="text-sm text-indigo-600 font-semibold hover:underline">View All {complaints.length} Tasks</button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-6 text-slate-400 text-sm border-2 border-dashed border-slate-100 rounded-xl">
-              No current tasks or complaints active.
-            </div>
-          )}
-        </div>
-
-      </div>
-
-      {/* Right Sidebar (Activity Tab) */}
-      <div className="w-full xl:w-80 space-y-6">
-        {/* User Card Mini Profile */}
-        <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-lg">
-            {context.workerId ? context.workerId.slice(0,2).toUpperCase() : 'FG'}
-          </div>
-          <div>
-            <h3 className="font-bold text-slate-800">Worker Profile</h3>
-            <p className="text-xs text-slate-500 capitalize">{context.zone} &bull; {context.category.replace(/_/g, ' ')}</p>
-          </div>
-        </div>
-
-        {/* Premium Certificate Card */}
-        <div className="bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-50 rounded-xl p-5 shadow-md border-2 border-amber-200 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-amber-200 rounded-full blur-2xl opacity-30"></div>
-          <div className="absolute bottom-0 left-0 w-16 h-16 bg-orange-200 rounded-full blur-2xl opacity-20"></div>
-          
-          <div className="relative z-10">
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-full bg-amber-500 flex items-center justify-center shadow-lg">
-                  <Award className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-amber-900">Income Certificate</h3>
-                  <p className="text-xs text-amber-700">Verified Earnings</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white bg-opacity-60 rounded-lg p-3 mb-3 border border-amber-100">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-amber-700 font-medium">Total Verified Earnings</p>
-                  <p className="text-lg font-bold text-amber-900">PKR {kpis.net.toLocaleString()}</p>
-                </div>
-                <FileText className="w-6 h-6 text-amber-500" />
-              </div>
-              <p className="text-xs text-amber-600 mt-2 font-medium">{kpis.verified} verified shifts</p>
-            </div>
-
-            <button 
-              onClick={() => {
-                window.location.href = '/certificate';
-              }}
-              className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl hover:from-amber-600 hover:to-orange-600 transition-all flex items-center justify-center gap-2 text-sm group"
-            >
-              <Download className="w-4 h-4 group-hover:translate-y-0.5 transition" />
-              Generate & Print Certificate
-            </button>
-
-            <p className="text-xs text-amber-700 mt-2 text-center">Download your official income certificate for loans, visa, or verification.</p>
-          </div>
-        </div>
-
-        {/* Activity Feed */}
-        <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-          <h2 className="text-base font-bold text-slate-800 mb-4 flex justify-between items-center">
-            <span>Recent Earnings</span>
-            <span className="bg-slate-100 text-slate-500 text-xs py-0.5 px-2 rounded-full">Activity</span>
-          </h2>
-          
-          <div className="space-y-4">
-            {sortedShifts.slice(0, 8).map((s, idx) => (
-              <div key={idx} className="flex gap-3 items-start">
-                <div className={`mt-1 w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white
-                  ${s.platform === 'uber' ? 'bg-slate-900' : s.platform === 'foodpanda' ? 'bg-pink-500' : 'bg-emerald-600'}`}>
-                  {s.platform.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1">
-                  <div className="flex justify-between">
-                    <p className="text-sm font-bold text-slate-800 capitalize">{s.platform}</p>
-                    <p className="text-sm font-bold text-emerald-600">+PKR {s.net_received}</p>
-                  </div>
-                  <div className="flex justify-between mt-0.5">
-                    <p className="text-xs text-slate-500">{formatRelativeTime(s.shift_date)}</p>
-                    <p className="text-xs text-slate-400 font-medium">{s.hours_worked} hrs</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-            
-            {sortedShifts.length === 0 && (
-               <p className="text-sm text-slate-400 italic text-center py-4">No recent earnings available.</p>
+            {hourlyPlatformShifts.length > 0 ? (
+              <ReactECharts option={hourlyRateOption} style={{ height: '100%', width: '100%' }} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">No hourly trend data yet.</div>
             )}
           </div>
-          
-          {sortedShifts.length > 8 && (
-            <button className="w-full mt-4 py-2 text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 rounded-lg transition">
-               View Full History
-            </button>
-          )}
+        </div>
 
+        <div className="col-span-12 md:col-span-6 lg:col-span-6 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-bold text-white">Platform Commission Rate Tracker</h2>
+            <div className="flex items-center gap-2">
+              <select
+                value={commissionPlatform}
+                onChange={(e) => setCommissionPlatform(e.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-slate-200 outline-none"
+              >
+                {platformOptions.map((p) => (
+                  <option key={`commission-${p}`} value={p}>{p === 'all' ? 'All Platforms' : p.toUpperCase()}</option>
+                ))}
+              </select>
+              <PeriodSelect value={commissionPeriod} onChange={setCommissionPeriod} dark />
+            </div>
+          </div>
+          <div className="h-64">
+            {commissionPlatformShifts.length > 0 ? (
+              <ReactECharts option={commissionTrackerOption} style={{ height: '100%', width: '100%' }} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">No commission data yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="col-span-12 lg:col-span-6 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+          <div className="mb-1 flex items-center justify-between">
+            <h2 className="text-base font-bold text-white">City Median Comparison</h2>
+            <PeriodSelect value={medianPeriod} onChange={setMedianPeriod} dark />
+          </div>
+          <p className="mb-3 text-xs text-slate-400">Compared against anonymised city-wide median for your category.</p>
+          <div className="h-64">
+            {medianShifts.length > 0 ? (
+              <ReactECharts option={cityMedianOption} style={{ height: '100%', width: '100%' }} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">No comparison data yet.</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
