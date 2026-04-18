@@ -45,8 +45,9 @@ async function createRefreshToken(userId: string, role: string): Promise<string>
 // ---------------------------------------------------------------------------
 app.post('/auth/register', async (req, res) => {
   const { name, email, password, role, city_zone, category, phone } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
 
-  if (!name || !email || !password || !role) {
+  if (!name || !normalizedEmail || !password || !role) {
     return res.status(400).json({ detail: 'name, email, password, role are required' });
   }
   if (!['worker', 'verifier', 'advocate'].includes(role)) {
@@ -59,11 +60,20 @@ app.post('/auth/register', async (req, res) => {
   const password_hash = await bcrypt.hash(password, 12);
 
   try {
+    const duplicateCheck = await pool.query(
+      `SELECT id FROM auth.users WHERE LOWER(email) = $1 LIMIT 1`,
+      [normalizedEmail],
+    );
+
+    if (duplicateCheck.rows.length) {
+      return res.status(409).json({ detail: 'Email already exists' });
+    }
+
     const result = await pool.query(
       `INSERT INTO auth.users (name, email, password_hash, role, city_zone, category, phone)
        VALUES ($1, $2, $3, $4::auth.user_role, $5::auth.city_zone, $6::auth.worker_category, $7)
        RETURNING id, name, email, role, city_zone, category, phone, avatar_url, bio, is_active, created_at`,
-      [name, email, password_hash, role, city_zone || null, category || null, phone || null],
+      [name, normalizedEmail, password_hash, role, city_zone || null, category || null, phone || null],
     );
 
     res.status(201).json(result.rows[0]);
@@ -81,16 +91,17 @@ app.post('/auth/register', async (req, res) => {
 // ---------------------------------------------------------------------------
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
 
-  if (!email || !password) {
+  if (!normalizedEmail || !password) {
     return res.status(400).json({ detail: 'email and password are required' });
   }
 
   const result = await pool.query(
     `SELECT id, name, email, role, password_hash
      FROM auth.users
-     WHERE email = $1 AND deleted_at IS NULL AND is_active = TRUE`,
-    [email],
+     WHERE LOWER(email) = $1 AND deleted_at IS NULL AND is_active = TRUE`,
+    [normalizedEmail],
   );
 
   const user = result.rows[0];

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, FormEvent } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, LineChart, Line, Cell
@@ -25,53 +25,282 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types ---
-interface Shift {
+// (Type definitions follow...)
   id: string;
-  platform: 'Careem' | 'Bykea' | 'foodpanda' | 'Upwork';
+  name: string;
+  email: string;
+  role: UserRole;
+  city_zone?: string | null;
+  category?: string | null;
+};
+
+type Shift = {
+  id: string;
+  worker_id?: string;
+  worker_name?: string;
+  verifier_id?: string | null;
+  verifier_note?: string | null;
+  screenshot_url?: string | null;
+  deduction_rate?: number;
+  created_at?: string;
+  platform: string;
   shift_date: string;
   hours_worked: number;
   gross_earned: number;
   platform_deductions: number;
   net_received: number;
-  verification_status: 'pending' | 'verified' | 'flagged';
-}
-
-interface UserProfile {
-  name: string;
-  id: string;
-  role: 'worker' | 'verifier' | 'advocate';
-  city_zone: string;
-  category: string;
-}
-
-// --- Mock Data ---
-const MOCK_USER: UserProfile = {
-  name: "Muhammad Ali",
-  id: "GW-2025-00432",
-  role: 'worker',
-  city_zone: "DHA Lahore",
-  category: "Ride-Hailing"
+  notes?: string | null;
+  verification_status: string;
 };
 
-const MOCK_SHIFTS: Shift[] = [
-  { id: '1', platform: 'Careem', shift_date: '2025-01-28', hours_worked: 6, gross_earned: 2100, platform_deductions: 420, net_received: 1680, verification_status: 'verified' },
-  { id: '2', platform: 'Bykea', shift_date: '2025-01-27', hours_worked: 4, gross_earned: 1450, platform_deductions: 280, net_received: 1170, verification_status: 'verified' },
-  { id: '3', platform: 'Careem', shift_date: '2025-01-27', hours_worked: 8, gross_earned: 3200, platform_deductions: 1120, net_received: 2080, verification_status: 'verified' },
-  { id: '4', platform: 'foodpanda', shift_date: '2025-01-26', hours_worked: 5, gross_earned: 1800, platform_deductions: 630, net_received: 1170, verification_status: 'pending' },
+type RegisterForm = {
+  name: string;
+  email: string;
+  password: string;
+  role: UserRole;
+  city_zone: string;
+  category: string;
+  phone: string;
+};
+
+type ShiftForm = {
+  platform: string;
+  shift_date: string;
+  hours_worked: string;
+  gross_earned: string;
+  platform_deductions: string;
+  notes: string;
+};
+
+type CsvDraftRow = {
+  rowNumber: number;
+  platform: string;
+  shift_date: string;
+  hours_worked: string;
+  gross_earned: string;
+  platform_deductions: string;
+  net_received: string;
+  notes: string;
+  errors: string[];
+  uploaded: boolean;
+  screenshotFile: File | null;
+  screenshotFileName: string;
+  uploadedShiftId?: string;
+  uploadError?: string;
+};
+
+type VerifierQueueItem = {
+  shift_id: string;
+  worker_id: string;
+  worker_name: string;
+  city_zone?: string | null;
+  category?: string | null;
+  platform: string;
+  shift_date: string;
+  hours_worked: number;
+  gross_earned: number;
+  platform_deductions: number;
+  net_received: number;
+  deduction_rate: number;
+  screenshot_url?: string | null;
+  submitted_at: string;
+};
+
+type ComplaintItem = {
+  id: string;
+  worker_id?: string;
+  worker_name?: string;
+  platform: string;
+  category: string;
+  description: string;
+  is_anonymous?: boolean;
+  tags?: string[];
+  status: 'open' | 'escalated' | 'resolved' | 'rejected';
+  cluster_id?: string | null;
+  upvotes?: number;
+  created_at?: string;
+};
+
+type AppSection = 'earnings' | 'community' | 'advocate' | 'verifier';
+
+const roles: UserRole[] = ['worker', 'verifier', 'advocate'];
+const zones = ['Gulberg', 'DHA', 'Saddar', 'Johar Town', 'Cantt', 'Other'];
+const categories = ['ride_hailing', 'food_delivery', 'freelance', 'domestic'];
+const platforms = ['Careem', 'Bykea', 'foodpanda', 'Upwork', 'Other'];
+const supportedImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
+const maxScreenshotBytes = 10 * 1024 * 1024;
+const maxCsvBytes = 5 * 1024 * 1024;
+const csvRequiredColumns = [
+  'platform',
+  'shift_date',
+  'hours_worked',
+  'gross_earned',
+  'platform_deductions',
+  'net_received',
+  'notes',
 ];
 
-const EARNINGS_TREND = [
-  { name: 'Jan 22', value: 2400 },
-  { name: 'Jan 23', value: 3600 },
-  { name: 'Jan 24', value: 2700 },
-  { name: 'Jan 25', value: 4200 },
-  { name: 'Jan 26', value: 5100 },
-  { name: 'Jan 27', value: 3900 },
-  { name: 'Jan 28', value: 3100 },
-];
+const env = (import.meta as any).env || {};
+const authBases = env.VITE_AUTH_BASE_URL ? [env.VITE_AUTH_BASE_URL] : ['/api/auth', 'http://localhost:8001/auth'];
+const earningsBases = env.VITE_EARNINGS_BASE_URL ? [env.VITE_EARNINGS_BASE_URL] : ['/api/shifts', 'http://localhost:8002/shifts'];
+const verifierBases = env.VITE_VERIFIER_BASE_URL ? [env.VITE_VERIFIER_BASE_URL] : ['/api/verifier', 'http://localhost:8002/verifier'];
+const grievanceBases = env.VITE_GRIEVANCE_BASE_URL ? [env.VITE_GRIEVANCE_BASE_URL] : ['http://localhost:8004/api', '/api'];
+
+function joinBase(base: string, endpoint: string) {
+  const normalizedBase = base.replace(/\/+$/, '');
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${normalizedBase}${normalizedEndpoint}`;
+}
+
+async function parseJsonSafe(response: Response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
+
+async function fetchWithFallback(
+  bases: string[],
+  endpoint: string,
+  options?: RequestInit,
+): Promise<{ response: Response; payload: any }> {
+  let lastError: unknown;
+
+  for (const base of bases) {
+    try {
+      const response = await fetch(joinBase(base, endpoint), options);
+      const payload = await parseJsonSafe(response);
+
+      // If mounted proxy path is wrong in current runtime, try direct service URL fallback.
+      if (response.status === 404 && bases.length > 1) {
+        continue;
+      }
+
+      return { response, payload };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('All API endpoints failed');
+}
+
+function getErrorMessage(payload: any, fallback: string) {
+  return payload?.detail || payload?.message || fallback;
+}
+
+function getUnknownErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function isCsvRowReady(row: CsvDraftRow) {
+  return row.errors.length === 0 && !!row.screenshotFile;
+}
+
+function splitCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !inQuotes) {
+      cells.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  cells.push(current.trim());
+  return cells.map((c) => c.replace(/^"|"$/g, '').trim());
+}
+
+function normalizeCsvDate(input: string) {
+  const value = (input || '').trim();
+  if (!value) {
+    return { value: '', error: 'shift_date is required' };
+  }
+
+  // Already in ISO format.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return { value };
+  }
+
+  const compact = value.replace(/\./g, '/').replace(/-/g, '/');
+  const parts = compact.split('/').map((p) => p.trim());
+
+  if (parts.length === 3) {
+    // YYYY/MM/DD
+    if (/^\d{4}$/.test(parts[0])) {
+      const y = Number(parts[0]);
+      const m = Number(parts[1]);
+      const d = Number(parts[2]);
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        return {
+          value: `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        };
+      }
+    }
+
+    // DD/MM/YYYY or MM/DD/YYYY heuristics.
+    if (/^\d{4}$/.test(parts[2])) {
+      const a = Number(parts[0]);
+      const b = Number(parts[1]);
+      const y = Number(parts[2]);
+
+      let d = a;
+      let m = b;
+
+      // If first token cannot be month, assume DD/MM.
+      if (a > 12 && b <= 12) {
+        d = a;
+        m = b;
+      } else if (b > 12 && a <= 12) {
+        // If second token cannot be month, assume MM/DD.
+        m = a;
+        d = b;
+      } else {
+        // Ambiguous: default to DD/MM.
+        d = a;
+        m = b;
+      }
+
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        return {
+          value: `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+        };
+      }
+    }
+  }
+
+  return { value: '', error: `shift_date must be YYYY-MM-DD (received: ${value})` };
+}
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'shifts' | 'grievances' | 'certificate' | 'analytics'>('dashboard');
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [token, setToken] = useState(localStorage.getItem('fairgig_token'));
+  const [userId, setUserId] = useState(localStorage.getItem('fairgig_user_id'));
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -86,7 +315,7 @@ export default function App() {
   // Auto-login for demo if no token
   useEffect(() => {
     if (!token) {
-      handleLogin('worker1@fairgig.demo', 'password');
+      handleLogin('worker1@fairgig.demo', 'password123');
     } else {
       fetchInitialData();
     }
@@ -94,29 +323,19 @@ export default function App() {
 
   const handleLogin = async (email: string, pass: string) => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const { response: res, payload } = await fetchWithFallback(authBases, '/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pass })
+        body: JSON.stringify(loginForm),
       });
       const data = await res.json();
       if (data.access_token) {
         localStorage.setItem('fairgig_token', data.access_token);
         localStorage.setItem('fairgig_user_id', data.user_id);
         setToken(data.access_token);
-      } else {
-        // Login failed — use mock data so UI is not stuck
-        console.warn('Login failed, using mock data. Run npm run seed first.');
-        setUser(MOCK_USER);
-        setShifts(MOCK_SHIFTS);
-        setLoading(false);
       }
     } catch (e) {
       console.error('Login failed', e);
-      // Network error — use mock data so UI is not stuck
-      setUser(MOCK_USER);
-      setShifts(MOCK_SHIFTS);
-      setLoading(false);
     }
   };
 
@@ -133,49 +352,157 @@ export default function App() {
       const aRes = await fetch('/api/anomaly/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worker_id: userId, earnings: sData.slice(0, 10) })
+        body: JSON.stringify(registerPayload),
       });
-      const aData = await aRes.json();
-      setAnomaly(aData);
 
-      // Fetch User Info
-      const uRes = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (uRes.ok) {
-        const uData = await uRes.json();
-        setUser(uData);
-      } else {
-        // Fallback for demo
-        setUser({ ...MOCK_USER, id: userId || 'worker-1' });
+      if (!registerRes.ok) {
+        setAuthError(getErrorMessage(registerData, 'Signup failed'));
+        return;
       }
 
-      // Fetch Median
-      const mRes = await fetch(`/api/analytics/median/ride_hailing/DHA`);
-      const mData = await mRes.json();
-      setMedian(mData.median_hourly);
+      const { response: loginRes, payload: loginData } = await fetchWithFallback(authBases, '/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: registerForm.email,
+          password: registerForm.password,
+        }),
+      });
+      if (!loginRes.ok) {
+        setAuthError(getErrorMessage(loginData, 'Signup complete but auto-login failed'));
+        return;
+      }
 
-      // Fetch Income Distribution (for all zones)
-      const distRes = await fetch('/api/analytics/income-distribution');
-      const distData = await distRes.json();
-      setDistributionData(distData);
-
-      // Fetch Commission Trends
-      const trendsRes = await fetch('/api/analytics/commission-trends');
-      setTrendsData(await trendsRes.json());
-
-      // Fetch Vulnerability Flags
-      const vulnRes = await fetch('/api/analytics/vulnerability-flags');
-      setVulnerabilityData(await vulnRes.json());
-
-      // Fetch Top Complaints
-      const compRes = await fetch('/api/analytics/top-complaints');
-      setTopComplaintsData(await compRes.json());
-
-    } catch (e) {
-      console.error('Data fetch failed', e);
+      localStorage.setItem('fairgig_token', loginData.access_token);
+      localStorage.setItem('fairgig_user_id', loginData.user_id);
+      setToken(loginData.access_token);
+      setUserId(loginData.user_id);
+      await fetchProfile(loginData.access_token, loginData.user_id);
+    } catch {
+      setAuthError('Unable to connect to auth service');
     } finally {
-      setLoading(false);
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleAddEarning(e: FormEvent) {
+    e.preventDefault();
+
+    if (!userId) {
+      setEarningsError('You must be logged in before adding earnings');
+      return;
+    }
+
+    if (!screenshotFile) {
+      setEarningsError('Screenshot is mandatory for submitting earnings');
+      return;
+    }
+
+    if (!screenshotFile.type.startsWith('image/')) {
+      setEarningsError('Screenshot must be an image file');
+      return;
+    }
+    if (!supportedImageTypes.includes(screenshotFile.type)) {
+      setEarningsError('Unsupported screenshot type. Allowed: JPG, PNG, WEBP');
+      return;
+    }
+    if (screenshotFile.size > maxScreenshotBytes) {
+      setEarningsError('Screenshot is too large. Max allowed size is 10MB');
+      return;
+    }
+
+    const payload = {
+      worker_id: userId,
+      platform: shiftForm.platform,
+      shift_date: shiftForm.shift_date,
+      hours_worked: Number(shiftForm.hours_worked),
+      gross_earned: Number(shiftForm.gross_earned),
+      platform_deductions: Number(shiftForm.platform_deductions),
+      net_received: Number((Number(shiftForm.gross_earned) - Number(shiftForm.platform_deductions)).toFixed(2)),
+      notes: shiftForm.notes || null,
+    };
+
+    if (payload.gross_earned < 0 || payload.platform_deductions < 0 || payload.hours_worked <= 0) {
+      setEarningsError('Hours must be > 0, and amounts cannot be negative');
+      return;
+    }
+
+    setEarningsLoading(true);
+    setEarningsError('');
+    setEarningsSuccess('');
+    let createdShiftId: string | null = null;
+
+    const rollbackCreatedShift = async () => {
+      if (!createdShiftId) return;
+      try {
+        await fetchWithFallback(earningsBases, `/${createdShiftId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worker_id: userId }),
+        });
+      } catch {
+        // Ignore rollback failures and preserve the original UI error.
+      }
+    };
+
+    try {
+      const { response: res, payload: data } = await fetchWithFallback(earningsBases, '', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        setEarningsError(getErrorMessage(data, 'Could not add earning'));
+        return;
+      }
+
+      createdShiftId = data.id;
+
+      let screenshotRes: Response;
+      let screenshotPayload: any;
+      try {
+        const formData = new FormData();
+        formData.append('worker_id', userId);
+        formData.append('file', screenshotFile);
+
+        const screenshotCall = await fetchWithFallback(earningsBases, `/${data.id}/screenshot`, {
+          method: 'POST',
+          body: formData,
+        });
+        screenshotRes = screenshotCall.response;
+        screenshotPayload = screenshotCall.payload;
+      } catch (error) {
+        await rollbackCreatedShift();
+        setEarningsError(
+          `Saved shift but could not reach screenshot endpoint on earnings service. ${getUnknownErrorMessage(error, 'Ensure earnings service is running on port 8002.')}`,
+        );
+        return;
+      }
+
+      if (!screenshotRes.ok) {
+        await rollbackCreatedShift();
+        setEarningsError(getErrorMessage(screenshotPayload, 'Shift saved, but could not save screenshot URL'));
+        return;
+      }
+
+      setEarningsSuccess('Earning added successfully');
+      setShifts((prev) => [
+        {
+          ...data,
+          screenshot_url: screenshotPayload?.file_url || null,
+          has_screenshot: true,
+        },
+        ...prev,
+      ]);
+      setShiftForm((prev) => ({ ...prev, notes: '' }));
+      setScreenshotFile(null);
+    } catch (error) {
+      await rollbackCreatedShift();
+      setEarningsError(
+        `Unable to save earning entry. ${getUnknownErrorMessage(error, 'Ensure earnings service is available on port 8002.')}`,
+      );
+    } finally {
+      setEarningsLoading(false);
     }
   };
 
@@ -196,15 +523,16 @@ export default function App() {
             FairGig
           </div>
           <nav className="flex gap-6">
-            {(user?.role === 'advocate'
-              ? ['dashboard', 'analytics', 'grievances']
+            {(user?.role === 'advocate' 
+              ? ['dashboard', 'analytics', 'grievances'] 
               : ['dashboard', 'shifts', 'grievances', 'certificate']
             ).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab as any)}
-                className={`text-sm font-semibold capitalize pt-1 pb-1 transition-all relative ${activeTab === tab ? 'text-text-main' : 'text-text-muted hover:text-text-main'
-                  }`}
+                className={`text-sm font-semibold capitalize pt-1 pb-1 transition-all relative ${
+                  activeTab === tab ? 'text-text-main' : 'text-text-muted hover:text-text-main'
+                }`}
               >
                 {tab}
                 {activeTab === tab && (
@@ -252,28 +580,28 @@ export default function App() {
                     <AreaChart data={EARNINGS_TREND}>
                       <defs>
                         <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                       <XAxis dataKey="name" hide />
                       <YAxis hide domain={['dataMin - 500', 'dataMax + 500']} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#fff',
-                          borderRadius: '12px',
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: '#fff', 
+                          borderRadius: '12px', 
                           border: '1px solid #E5E7EB',
                           boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
                         }}
                       />
-                      <Area
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#10b981"
+                      <Area 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke="#10b981" 
                         strokeWidth={3}
-                        fillOpacity={1}
-                        fill="url(#colorValue)"
+                        fillOpacity={1} 
+                        fill="url(#colorValue)" 
                       />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -335,20 +663,58 @@ export default function App() {
                 <div className="card-title-bento">City Comparison</div>
                 <div className="text-[11px] font-bold mb-3">{MOCK_USER.city_zone} Median</div>
                 <div className="w-full h-2 bg-gray-100 rounded-full relative overflow-visible">
-                  <div className="absolute top-0 left-0 h-full bg-brand rounded-full"
-                    style={{ width: `${Math.min(100, (avgHourlyRate / (median * 1.5)) * 100)}%` }} />
+                  <div className="absolute top-0 left-0 h-full bg-brand rounded-full" 
+                       style={{ width: `${Math.min(100, (avgHourlyRate / (median * 1.5)) * 100)}%` }} />
                   <div className="absolute top-[-4px] left-[66%] h-4 w-0.5 bg-black" />
                 </div>
-                <div className="flex justify-between mt-3">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] uppercase font-bold text-brand">Your Rate</span>
-                    <span className="text-xs font-black">{Math.round(avgHourlyRate)}</span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className="text-[8px] uppercase font-bold text-text-muted">Median</span>
-                    <span className="text-xs font-black">{median}</span>
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                    onClick={() => {
+                      setCommunityError('');
+                      setCommunitySuccess('');
+                      setShowCreateComplaintModal(true);
+                    }}
+                  >
+                    + New Complaint
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => setShowMyComplaintsModal(true)}
+                  >
+                    My Previous Complaints
+                  </button>
                 </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <select
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={communityFilterPlatform}
+                  onChange={(e) => setCommunityFilterPlatform(e.target.value)}
+                >
+                  <option value="all">All Platforms</option>
+                  {platforms.map((platform) => (
+                    <option key={platform} value={platform}>
+                      {platform}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={communityFilterCategory}
+                  onChange={(e) => setCommunityFilterCategory(e.target.value)}
+                >
+                  <option value="all">All Categories</option>
+                  <option value="commission_hike">commission_hike</option>
+                  <option value="account_deactivation">account_deactivation</option>
+                  <option value="payment_delay">payment_delay</option>
+                  <option value="unfair_rating">unfair_rating</option>
+                  <option value="data_privacy">data_privacy</option>
+                  <option value="other">other</option>
+                </select>
               </div>
 
               {/* Recent Activity Card */}
@@ -358,9 +724,10 @@ export default function App() {
                   {shifts.slice(0, 3).map((shift) => (
                     <div key={shift.id} className="flex items-center justify-between py-2 border-b border-border-dim last:border-0 hover:bg-gray-50/50 px-2 rounded-lg transition-colors cursor-pointer group">
                       <div className="flex items-center gap-3">
-                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${shift.platform === 'Careem' ? 'bg-green-100 text-green-700' :
-                            shift.platform === 'Bykea' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100'
-                          }`}>
+                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                          shift.platform === 'Careem' ? 'bg-green-100 text-green-700' : 
+                          shift.platform === 'Bykea' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100'
+                        }`}>
                           {shift.platform}
                         </div>
                         <div className="text-xs font-semibold text-text-main">{shift.shift_date}</div>
@@ -433,9 +800,10 @@ export default function App() {
                         <td className="px-6 py-4 text-xs font-bold text-text-muted">Rs. {shift.gross_earned}</td>
                         <td className="px-6 py-4 text-xs font-black">Rs. {shift.net_received}</td>
                         <td className="px-6 py-4">
-                          <span className={`badge-bento ${shift.verification_status === 'verified' ? 'bg-brand/10 text-brand' :
-                              shift.verification_status === 'pending' ? 'bg-yellow-50 text-warning' : 'bg-red-50 text-danger'
-                            }`}>
+                          <span className={`badge-bento ${
+                            shift.verification_status === 'verified' ? 'bg-brand/10 text-brand' : 
+                            shift.verification_status === 'pending' ? 'bg-yellow-50 text-warning' : 'bg-red-50 text-danger'
+                          }`}>
                             {shift.verification_status}
                           </span>
                         </td>
@@ -478,42 +846,132 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-12 space-y-8">
-                <div className="grid grid-cols-2 gap-8">
-                  <div>
-                    <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Worker Profile</label>
-                    <div className="text-lg font-black mt-1">{user?.name}</div>
-                    <div className="text-xs text-text-muted font-medium mt-0.5">ID: {user?.id}</div>
-                  </div>
-                  <div className="text-right">
-                    <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Region / Category</label>
-                    <div className="text-lg font-black mt-1">{user?.city_zone}</div>
-                    <div className="text-xs text-text-muted font-medium mt-0.5">{user?.category}</div>
-                  </div>
-                </div>
+              <div className="mb-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-3">
+                <select
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={verifierPlatformFilter}
+                  onChange={(e) => setVerifierPlatformFilter(e.target.value)}
+                >
+                  <option value="all">All Platforms</option>
+                  {pendingPlatformOptions.map((platform) => (
+                    <option key={platform} value={platform}>
+                      {platform}
+                    </option>
+                  ))}
+                </select>
 
-                <div className="border-y border-border-dim py-6">
-                  <div className="grid grid-cols-3 gap-4 text-center">
-                    <div>
-                      <div className="text-[10px] font-bold text-text-muted uppercase mb-1">Total Net</div>
-                      <div className="text-xl font-black">Rs. {totalVerifiedNet.toLocaleString()}</div>
+                <input
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="Filter by worker name"
+                  value={verifierWorkerFilter}
+                  onChange={(e) => setVerifierWorkerFilter(e.target.value)}
+                />
+
+                <select
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={verifierSortOrder}
+                  onChange={(e) => setVerifierSortOrder(e.target.value as 'newest' | 'oldest')}
+                >
+                  <option value="oldest">Oldest First</option>
+                  <option value="newest">Newest First</option>
+                </select>
+              </div>
+
+              {Object.keys(pendingByWorker).length === 0 ? (
+                <p className="text-sm text-slate-600">No pending entries match the current filters.</p>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(pendingByWorker).map(([workerLabel, entries]) => (
+                    <div key={workerLabel} className="rounded-xl border border-slate-200 p-3">
+                      <h3 className="mb-2 text-sm font-semibold text-slate-800">{workerLabel}</h3>
+                      <div className="space-y-3">
+                        {entries.map((entry) => (
+                          <div key={entry.shift_id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="grid grid-cols-2 gap-2 text-xs text-slate-700 sm:grid-cols-3">
+                              <div>Date: {entry.shift_date}</div>
+                              <div>Platform: {entry.platform}</div>
+                              <div>Hours: {entry.hours_worked}</div>
+                              <div>Gross: PKR {Number(entry.gross_earned).toFixed(2)}</div>
+                              <div>Deduction: PKR {Number(entry.platform_deductions).toFixed(2)}</div>
+                              <div>Net: PKR {Number(entry.net_received).toFixed(2)}</div>
+                            </div>
+
+                            {entry.screenshot_url ? (
+                              <div className="mt-2 flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  className="overflow-hidden rounded-lg border border-slate-300 bg-white"
+                                  onClick={() => setPreviewScreenshotUrl(entry.screenshot_url || null)}
+                                >
+                                  <img
+                                    src={entry.screenshot_url}
+                                    alt="Shift proof"
+                                    className="h-20 w-32 object-cover"
+                                  />
+                                </button>
+                                <a
+                                  href={entry.screenshot_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs font-semibold text-emerald-700 underline"
+                                >
+                                  Open full image
+                                </a>
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-xs text-slate-500">No screenshot uploaded</p>
+                            )}
+
+                            <textarea
+                              className="mt-2 min-h-16 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs"
+                              placeholder="Add verifier note (optional)"
+                              value={decisionNotes[entry.shift_id] || ''}
+                              onChange={(e) =>
+                                setDecisionNotes((prev) => ({
+                                  ...prev,
+                                  [entry.shift_id]: e.target.value,
+                                }))
+                              }
+                            />
+
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                disabled={decisionLoadingId === entry.shift_id}
+                                onClick={() => handleVerifierDecision(entry.shift_id, 'verified')}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                disabled={decisionLoadingId === entry.shift_id}
+                                onClick={() => handleVerifierDecision(entry.shift_id, 'flagged')}
+                              >
+                                Flag
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                disabled={decisionLoadingId === entry.shift_id}
+                                onClick={() => handleVerifierDecision(entry.shift_id, 'unverifiable')}
+                              >
+                                Unverifiable
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-[10px] font-bold text-text-muted uppercase mb-1">Avg Hourly</div>
-                      <div className="text-xl font-black">Rs. {Math.round(avgHourlyRate)}/hr</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-bold text-text-muted uppercase mb-1">Status</div>
-                      <div className="text-xl font-black text-brand">VERIFIED</div>
-                    </div>
-                  </div>
+                  ))}
                 </div>
 
                 <div className="text-center">
                   <p className="text-[10px] text-text-muted italic mb-6">
                     This document certifies that the individual named above has successfully verified their platform earnings through FairGig protocols as of {new Date().toLocaleDateString()}.
                   </p>
-                  <button
+                  <button 
                     onClick={() => window.print()}
                     className="btn-bento btn-bento-primary no-print"
                   >
@@ -578,8 +1036,8 @@ export default function App() {
 
                 {/* Top Complaints */}
                 <div className="card-bento md:col-span-1">
-                  <div className="card-title-bento mb-4">Top Grievance Categories</div>
-                  <div className="h-[240px]">
+                   <div className="card-title-bento mb-4">Top Grievance Categories</div>
+                   <div className="h-[240px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart layout="vertical" data={topComplaintsData} margin={{ left: 20 }}>
                         <XAxis type="number" hide />
@@ -625,17 +1083,123 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
 
-      {/* Footer */}
-      <footer className="px-8 py-6 border-t border-border-dim text-center">
-        <p className="text-[10px] text-text-muted font-bold tracking-widest uppercase">
-          FairGig © 2026 • Built for SOFTEC Web Dev Competition
-        </p>
-      </footer>
-    </div>
+              <form onSubmit={submitCommunityComplaint} className="space-y-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <select
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={communityForm.platform}
+                    onChange={(e) => setCommunityForm((prev) => ({ ...prev, platform: e.target.value }))}
+                  >
+                    {platforms.map((platform) => (
+                      <option key={platform} value={platform}>
+                        {platform}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={communityForm.category}
+                    onChange={(e) => setCommunityForm((prev) => ({ ...prev, category: e.target.value }))}
+                  >
+                    <option value="commission_hike">commission_hike</option>
+                    <option value="account_deactivation">account_deactivation</option>
+                    <option value="payment_delay">payment_delay</option>
+                    <option value="unfair_rating">unfair_rating</option>
+                    <option value="data_privacy">data_privacy</option>
+                    <option value="other">other</option>
+                  </select>
+                </div>
+
+                <textarea
+                  className="min-h-28 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="Describe complaint (minimum 20 chars)"
+                  value={communityForm.description}
+                  onChange={(e) => setCommunityForm((prev) => ({ ...prev, description: e.target.value }))}
+                />
+
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={communityForm.is_anonymous}
+                    onChange={(e) => setCommunityForm((prev) => ({ ...prev, is_anonymous: e.target.checked }))}
+                  />
+                  Post anonymously
+                </label>
+
+                {communityError && <p className="text-sm font-medium text-red-600">{communityError}</p>}
+
+                <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white" type="submit">
+                  Post Complaint
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {showMyComplaintsModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            onClick={() => setShowMyComplaintsModal(false)}
+          >
+            <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-900">My Previous Complaints</h3>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                  onClick={() => setShowMyComplaintsModal(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              {myComplaintsError && <p className="mb-3 text-sm font-medium text-red-600">{myComplaintsError}</p>}
+
+              {myComplaintsLoading ? (
+                <p className="text-sm text-slate-600">Loading your complaints...</p>
+              ) : myComplaints.length === 0 ? (
+                <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">You have not posted any complaints yet.</p>
+              ) : (
+                <div className="max-h-[65vh] space-y-3 overflow-auto pr-1">
+                  {myComplaints.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">{item.platform}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">{item.category}</span>
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold capitalize text-emerald-800">{item.status}</span>
+                        <span>{item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown date'}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-800">{item.description}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {previewScreenshotUrl && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            onClick={() => setPreviewScreenshotUrl(null)}
+          >
+            <div className="max-h-[90vh] max-w-5xl overflow-hidden rounded-xl bg-white" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+                <p className="text-sm font-semibold text-slate-800">Screenshot Preview</p>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                  onClick={() => setPreviewScreenshotUrl(null)}
+                >
+                  Close
+                </button>
+              </div>
+              <img src={previewScreenshotUrl} alt="Screenshot preview" className="max-h-[80vh] w-full object-contain" />
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
