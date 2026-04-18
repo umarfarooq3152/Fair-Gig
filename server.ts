@@ -35,10 +35,13 @@ async function startServer() {
 
   const app = express();
 
+  // Stream multipart/binary bodies directly to downstream services (screenshots/CSV uploads).
+  const streamingProxyOptions = { parseReqBody: false };
+
   // --- API Gateway Routes ---
   app.use('/api/auth', proxy('http://localhost:8001'));
-  app.use('/api/shifts', proxy('http://localhost:8002'));
-  app.use('/api/verifier', proxy('http://localhost:8002'));
+  app.use('/api/shifts', proxy('http://localhost:8002', streamingProxyOptions));
+  app.use('/api/verifier', proxy('http://localhost:8002', streamingProxyOptions));
   app.use('/api/anomaly', proxy('http://localhost:8003'));
   app.use('/api/analyze', proxy('http://localhost:8003/analyze'));
   app.use('/api/grievances', proxy('http://localhost:8004/complaints'));
