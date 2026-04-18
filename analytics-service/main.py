@@ -1,5 +1,6 @@
 import os
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 
 import psycopg2
 from dotenv import load_dotenv
@@ -7,6 +8,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2.extras import RealDictCursor
 
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -25,6 +27,11 @@ def get_conn():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not configured")
     return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "analytics-service", "port": 8005}
 
 
 @app.get("/analytics/commission-trends")
@@ -74,7 +81,25 @@ def income_distribution(zone: Optional[str] = Query(default=None)):
                 """,
                 (zone, zone),
             )
-            return cur.fetchall()
+            zones = cur.fetchall()
+    histogram: list[dict[str, Any]] = []
+    bucket_meta = [
+        ("0–20k PKR", "bucket_0_20k"),
+        ("20–40k PKR", "bucket_20_40k"),
+        ("40–60k PKR", "bucket_40_60k"),
+        ("60k+ PKR", "bucket_60k_plus"),
+    ]
+    for row in zones:
+        z = row["zone"]
+        for label, key in bucket_meta:
+            histogram.append(
+                {
+                    "zone": z,
+                    "bucket_range": label,
+                    "worker_count": int(row[key] or 0),
+                }
+            )
+    return {"zones": zones, "histogram": histogram}
 
 
 @app.get("/analytics/vulnerability-flags")
@@ -93,7 +118,17 @@ def vulnerability_flags():
                     THEN s.net_received ELSE 0 END)::numeric, 2) AS current_month,
                   ROUND(SUM(CASE
                     WHEN date_trunc('month', s.shift_date) = date_trunc('month', NOW() - INTERVAL '1 month')
-                    THEN s.net_received ELSE 0 END)::numeric, 2) AS previous_month
+                    THEN s.net_received ELSE 0 END)::numeric, 2) AS previous_month,
+                  ROUND((
+                    1 - (
+                      SUM(CASE
+                        WHEN date_trunc('month', s.shift_date) = date_trunc('month', NOW())
+                        THEN s.net_received ELSE 0 END)
+                      / NULLIF(SUM(CASE
+                        WHEN date_trunc('month', s.shift_date) = date_trunc('month', NOW() - INTERVAL '1 month')
+                        THEN s.net_received ELSE 0 END), 0)
+                    )
+                  ) * 100, 1) AS drop_percentage
                 FROM auth.users u
                 JOIN earnings.shifts s ON s.worker_id = u.id
                 WHERE u.role = 'worker'
@@ -121,11 +156,12 @@ def median_hourly(category: str, zone: str):
                 """
                 SELECT
                   PERCENTILE_CONT(0.5) WITHIN GROUP
-                    (ORDER BY net_received / NULLIF(hours_worked, 0)) AS median_hourly
+                    (ORDER BY net_received / NULLIF(hours_worked, 0)) AS median_hourly,
+                  COUNT(*)::int AS sample_size
                 FROM earnings.shifts s
                 JOIN auth.users u ON u.id = s.worker_id
-                WHERE u.city_zone = %s
-                  AND u.category = %s
+                WHERE u.city_zone::text = %s
+                  AND u.category::text = %s
                   AND s.shift_date >= NOW() - INTERVAL '30 days'
                   AND s.verification_status = 'verified'
                   AND s.hours_worked > 0
@@ -133,7 +169,15 @@ def median_hourly(category: str, zone: str):
                 (zone, category),
             )
             row = cur.fetchone()
-            return {"median_hourly": float(row["median_hourly"] or 0)}
+            med = float(row["median_hourly"] or 0)
+            n = int(row["sample_size"] or 0)
+            return {
+                "median_hourly_rate": med,
+                "median_hourly": med,
+                "sample_size": n,
+                "category": category,
+                "zone": zone,
+            }
 
 
 @app.get("/analytics/top-complaints")

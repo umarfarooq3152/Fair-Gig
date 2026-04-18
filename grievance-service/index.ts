@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
 import { EventEmitter } from 'events';
@@ -10,11 +12,16 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config();
 
 const app = express();
 const PORT = 8004;
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey_changeme';
-const JWT_SECRET_UINT8 = new TextEncoder().encode(JWT_SECRET);
+const JWT_SECRET_RAW = process.env.JWT_SECRET;
+if (!JWT_SECRET_RAW) {
+  console.error('FATAL: JWT_SECRET is required (same value as auth-service)');
+  process.exit(1);
+}
+const JWT_SECRET_UINT8 = new TextEncoder().encode(JWT_SECRET_RAW);
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -23,6 +30,10 @@ const pool = new Pool({
 
 app.use(cors());
 app.use(express.json());
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'grievance-service', port: PORT });
+});
 
 const grievanceEvents = new EventEmitter();
 
@@ -1041,43 +1052,67 @@ function grievancesStatusEvents(
   });
 }
 
-// Legacy compatibility routes used by older frontend flows.
-app.get('/complaints', async (req, res) => {
+// ---------------------------------------------------------------------------
+// GET /api/complaints/board/tag-clusters — GROUP BY primary tag + platform
+// ---------------------------------------------------------------------------
+app.get('/api/complaints/board/tag-clusters', async (_req, res) => {
   try {
-    const { platform, category, status, worker_id } = req.query;
-    const values: unknown[] = [];
-    const where: string[] = [];
-
-    if (platform) {
-      values.push(platform);
-      where.push(`platform = $${values.length}`);
-    }
-    if (category) {
-      values.push(category);
-      where.push(`category = $${values.length}::grievance.complaint_category`);
-    }
-    if (status) {
-      values.push(status);
-      where.push(`status = $${values.length}::grievance.complaint_status`);
-    }
-    if (worker_id) {
-      values.push(worker_id);
-      where.push(`worker_id = $${values.length}`);
-    }
-
-    const result = await pool.query(
-      `SELECT id, worker_id, platform, category, description, is_anonymous, tags, status, upvotes, created_at, updated_at
-       FROM grievance.complaints
-       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY created_at DESC`,
-      values,
-    );
-
+    const result = await pool.query(`
+      SELECT
+        COALESCE(tags[1], 'untagged') AS primary_tag,
+        platform,
+        COUNT(*)::int AS complaint_count,
+        array_agg(id ORDER BY created_at DESC) AS complaint_ids
+      FROM grievance.complaints
+      GROUP BY COALESCE(tags[1], 'untagged'), platform
+      ORDER BY complaint_count DESC
+    `);
     res.json(result.rows);
   } catch (err: any) {
-    console.error('GET /complaints error:', err?.message || err);
-    res.status(400).json({ detail: err?.message || 'Could not load complaints' });
+    console.error('GET /api/complaints/board/tag-clusters error:', err.message);
+    res.status(400).json({ detail: err.message });
   }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/complaints/:id — single complaint (public fields)
+// Must be registered after all /api/complaints/... static paths.
+// ---------------------------------------------------------------------------
+app.get('/api/complaints/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT
+         id,
+         worker_id,
+         platform,
+         category,
+         description,
+         tags,
+         status,
+         advocate_id,
+         cluster_id,
+         upvotes,
+         created_at,
+         updated_at
+       FROM grievance.complaints
+       WHERE id = $1`,
+      [id],
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ detail: 'Complaint not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    console.error('GET /api/complaints/:id error:', err.message);
+    res.status(400).json({ detail: err.message });
+  }
+});
+
+// Legacy compatibility routes currently used in some pages.
+app.get('/complaints', (req, res) => {
+  req.url = '/api/complaints/public';
+  app.handle(req, res);
 });
 
 app.post('/complaints', async (req, res) => {
@@ -1112,26 +1147,27 @@ app.post('/complaints', async (req, res) => {
   }
 });
 
-app.get('/complaints/mine', async (req, res) => {
-  try {
-    const workerId = String(req.query.worker_id || '');
-    if (!workerId) {
-      return res.status(400).json({ detail: 'worker_id is required' });
-    }
+app.get('/complaints/mine', (req, res) => {
+  req.url = '/api/complaints/mine';
+  app.handle(req, res);
+});
 
-    const result = await pool.query(
-      `SELECT id, worker_id, platform, category, description, is_anonymous, tags, status, upvotes, created_at, updated_at
-       FROM grievance.complaints
-       WHERE worker_id = $1
-       ORDER BY created_at DESC`,
-      [workerId],
-    );
-
-    res.json(result.rows);
-  } catch (err: any) {
-    console.error('GET /complaints/mine error:', err?.message || err);
-    res.status(400).json({ detail: err?.message || 'Could not load your complaints' });
-  }
+app.get('/complaints/clusters', (_req, res) => {
+  pool
+    .query(
+      `
+      SELECT
+        COALESCE(tags[1], 'untagged') AS primary_tag,
+        platform,
+        COUNT(*)::int AS complaint_count,
+        array_agg(id ORDER BY created_at DESC) AS complaint_ids
+      FROM grievance.complaints
+      GROUP BY COALESCE(tags[1], 'untagged'), platform
+      ORDER BY complaint_count DESC
+    `,
+    )
+    .then((result) => res.json({ clusters: result.rows }))
+    .catch((err: Error) => res.status(400).json({ detail: err.message }));
 });
 
 app.listen(PORT, () => {

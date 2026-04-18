@@ -55,9 +55,9 @@ const services: ServiceConfig[] = [
   {
     name: 'Earnings Service',
     port: 8002,
-    cwd: path.resolve(__dirname, 'earnings-service'),
-    command: isWindows ? 'cmd.exe' : 'tsx',
-    args: isWindows ? ['/d', '/s', '/c', 'tsx index.ts'] : ['index.ts'],
+    cwd: path.resolve(__dirname),
+    command: isWindows ? 'node.exe' : 'node',
+    args: ['earnings-service/index.js'],
   },
   {
     name: 'Anomaly Service',
@@ -71,9 +71,9 @@ const services: ServiceConfig[] = [
   {
     name: 'Grievance Service',
     port: 8004,
-    cwd: path.resolve(__dirname, 'grievance-service'),
-    command: isWindows ? 'cmd.exe' : 'tsx',
-    args: isWindows ? ['/d', '/s', '/c', 'tsx index.ts'] : ['index.ts'],
+    cwd: path.resolve(__dirname),
+    command: isWindows ? 'npx.cmd' : 'npx',
+    args: ['--yes', 'tsx', 'grievance-service/index.ts'],
   },
   {
     name: 'Analytics Service',

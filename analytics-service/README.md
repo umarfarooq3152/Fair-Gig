@@ -12,8 +12,9 @@ Environment variables:
 - `DATABASE_URL`
 
 Endpoints:
+- `GET /health`
 - `GET /analytics/commission-trends` — Monthly platform commission rates (6 months)
-- `GET /analytics/income-distribution` — Zone-wise income histogram buckets
-- `GET /analytics/vulnerability-flags` — Workers with >20% MoM income drop
-- `GET /analytics/median/:category/:zone` — 30-day city median hourly for worker category/zone
+- `GET /analytics/income-distribution` — `{ zones: [...], histogram: [{ zone, bucket_range, worker_count }] }`
+- `GET /analytics/vulnerability-flags` — Workers with >20% MoM income drop (`drop_percentage` included)
+- `GET /analytics/median/:category/:zone` — `{ median_hourly_rate, median_hourly, sample_size, category, zone }`
 - `GET /analytics/top-complaints` — Top grievance categories in last 7 days

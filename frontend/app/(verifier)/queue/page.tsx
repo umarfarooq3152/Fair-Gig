@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, authFetch } from '@/lib/api';
 
 type QueueShift = {
   id: string;
@@ -16,10 +16,22 @@ type QueueShift = {
 
 export default function VerifierQueuePage() {
   const [items, setItems] = useState<QueueShift[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    const res = await fetch(`${API_BASE.earnings}/verifier/queue`, { cache: 'no-store' });
-    setItems(await res.json());
+    setError('');
+    setLoading(true);
+    const res = await authFetch(`${API_BASE.earnings}/verifier/queue`);
+    const data = await res.json();
+    if (!res.ok) {
+      setError(typeof data?.detail === 'string' ? data.detail : 'Could not load queue');
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    setItems(Array.isArray(data) ? data : []);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -27,11 +39,9 @@ export default function VerifierQueuePage() {
   }, []);
 
   const decide = async (id: string, status: 'verified' | 'flagged' | 'unverifiable') => {
-    const verifierId = localStorage.getItem('fairgig_user_id');
-    await fetch(`${API_BASE.earnings}/verifier/${id}/decision`, {
+    await authFetch(`${API_BASE.earnings}/verifier/${id}/decision`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, verifier_id: verifierId }),
+      body: JSON.stringify({ status }),
     });
     await load();
   };
@@ -39,6 +49,13 @@ export default function VerifierQueuePage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">Verifier Queue</h1>
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {loading ? <p className="text-sm text-slate-500">Loading queue…</p> : null}
+      {!loading && items.length === 0 && !error ? (
+        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-slate-600">
+          No pending shifts with screenshots. You&apos;re all caught up.
+        </p>
+      ) : null}
       {items.map((shift) => (
         <div key={shift.id} className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 md:grid-cols-2">
           <div className="space-y-1 text-sm">

@@ -17,28 +17,34 @@ export default function RegisterPage() {
     category: 'ride_hailing',
   });
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    setSubmitting(true);
 
     if (!form.name || !form.email || !form.password || !form.confirmPassword) {
       setError('Please fill in all required fields.');
+      setSubmitting(false);
       return;
     }
 
     if (!/^\S+@\S+\.\S+$/.test(form.email)) {
       setError('Please enter a valid email address.');
+      setSubmitting(false);
       return;
     }
 
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters long.');
+      setSubmitting(false);
       return;
     }
 
     if (form.password !== form.confirmPassword) {
       setError('Passwords do not match.');
+      setSubmitting(false);
       return;
     }
 
@@ -60,6 +66,8 @@ export default function RegisterPage() {
     } catch (err) {
       console.error(err);
       setError('Network error: Unable to connect to the authentication service.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -79,14 +87,24 @@ export default function RegisterPage() {
             <option value="advocate">Advocate</option>
           </select>
           <select className="h-12 w-full rounded-none border-2 border-slate-200 px-3 font-bold focus:border-slate-900 focus:outline-none" value={form.city_zone} onChange={(e) => setForm({ ...form, city_zone: e.target.value })}>
-            <option>Gulberg</option><option>DHA</option><option>Saddar</option><option>Johar Town</option><option>Cantt</option>
+            <option value="Gulberg">Gulberg</option>
+            <option value="DHA">DHA</option>
+            <option value="Saddar">Saddar</option>
+            <option value="Johar Town">Johar Town</option>
+            <option value="Cantt">Cantt</option>
           </select>
           <select className="h-12 w-full md:col-span-2 rounded-none border-2 border-slate-200 px-3 font-bold focus:border-slate-900 focus:outline-none" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
             <option value="ride_hailing">Ride Hailing</option><option value="food_delivery">Food Delivery</option><option value="freelance">Freelance</option><option value="domestic">Domestic</option>
           </select>
           <div className="md:col-span-2 flex flex-col items-center gap-2">
             {error ? <p className="text-sm font-bold text-red-600">{error}</p> : null}
-            <button className="h-14 w-full bg-mint-500 text-[11px] font-black uppercase tracking-widest text-slate-900 hover:bg-mint-600" type="submit">Register Now</button>
+            <button
+              className="h-14 w-full bg-mint-500 text-[11px] font-black uppercase tracking-widest text-slate-900 hover:bg-mint-600 disabled:opacity-60"
+              type="submit"
+              disabled={submitting}
+            >
+              {submitting ? 'Creating account…' : 'Register Now'}
+            </button>
           </div>
         </form>
         <div className="mt-6 border-t-2 border-slate-100 pt-6 text-center text-sm text-slate-500">

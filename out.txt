@@ -1,0 +1,13 @@
+﻿Γùç injected env (11) from .env // tip: Γîÿ override existing { override: true }
+workerCount: 64
+shiftsCount: 1534
+platformsCount: 4
+cityZoneCount: 5
+monthsCount: 8
+complaintsCount: 5
+impossibleEarnings: 0
+mathError: 0
+invalidRole: 0
+orphanedShifts: 0
+workersPerCity: [{"city_zone":"Johar Town","count":"9"},{"city_zone":"Gulberg","count":"11"},{"city_zone":"Saddar","count":"15"},{"city_zone":"Cantt","count":"12"},{"city_zone":"DHA","count":"17"}]
+deductionRates: [{"platform":"Careem","min_rate":"0.25000000000000000000","max_rate":"0.47625094446356447472"},{"platform":"Bykea","min_rate":"0.18025051153115640949","max_rate":"0.39163258041333360199"},{"platform":"foodpanda","min_rate":"0.07692307692307692308","max_rate":"0.53903233243040746931"},{"platform":"Upwork","min_rate":"0.10036736308660349278","max_rate":"0.36823477447814190410"}]

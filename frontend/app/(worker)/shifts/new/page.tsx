@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, authFetch } from '@/lib/api';
 
 export default function NewShiftPage() {
   const router = useRouter();
@@ -18,9 +18,8 @@ export default function NewShiftPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const worker_id = localStorage.getItem('fairgig_user_id');
-    const res = await fetch(`${API_BASE.earnings}/shifts`, {
+    const res = await authFetch(`${API_BASE.earnings}/shifts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...form, worker_id }),
     });
 

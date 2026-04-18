@@ -1,19 +1,27 @@
 # Grievance Service
 
-Node.js service for complaint posting, tagging, clustering, and escalation workflow.
+Node.js + TypeScript service for complaint posting, tagging, clustering, and advocate moderation.
 
 Install command:
-`npm install express pg cors dotenv`
+`npm install express pg cors dotenv jose` (+ `tsx` / `typescript` for TypeScript)
 
-Start command:
-`node index.js`
+Start command (from **repo root**):
+`npx tsx grievance-service/index.ts`
 
 Environment variables:
 - `DATABASE_URL`
+- `JWT_SECRET` (required — same as auth-service)
 
-Endpoints:
-- `POST /complaints` — Worker creates complaint
-- `GET /complaints` — List complaints with filters
-- `PUT /complaints/:id/tags` — Add/update tags array
-- `PUT /complaints/:id/status` — Set status to `open|escalated|resolved`
-- `GET /complaints/clusters` — Grouped complaint clusters by primary tag and platform
+Primary endpoints (details in `API_CONTRACTS.md`):
+- `GET /health`
+- `GET /api/complaints/public` — Public grievance board
+- `POST /api/complaints` — Worker creates complaint (Bearer required)
+- `GET /api/complaints/advocate/feed` — Advocate moderation queue (cursor pagination)
+- `PUT /api/complaints/:id/moderate` — Advocate updates tags / category / notes
+- `GET /api/complaints/:id` — Single complaint
+- `GET /api/complaints/board/tag-clusters` — GROUP BY tag + platform with `complaint_ids` arrays
+
+Legacy aliases:
+- `GET /complaints` → public feed
+- `POST /complaints` → `POST /api/complaints`
+- `GET /complaints/clusters` → `{ clusters: [...] }`

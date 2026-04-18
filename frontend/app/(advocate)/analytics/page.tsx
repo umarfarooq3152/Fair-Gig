@@ -31,7 +31,8 @@ export default function AdvocateAnalyticsPage() {
         fetch(`${API_BASE.analytics}/analytics/vulnerability-flags`).then((r) => r.json()),
       ]);
       setCommission(a);
-      setDistribution(b);
+      const distPayload = b && typeof b === 'object' && 'zones' in b ? (b as { zones: unknown[] }).zones : b;
+      setDistribution(Array.isArray(distPayload) ? distPayload : []);
       setComplaints(c);
       setFlags(d);
     };
@@ -100,15 +101,23 @@ export default function AdvocateAnalyticsPage() {
                 <th>Zone</th>
                 <th>Current</th>
                 <th>Previous</th>
+                <th>Change</th>
               </tr>
             </thead>
             <tbody>
               {flags.map((f) => (
-                <tr key={f.id} className="border-b">
+                <tr key={String(f.id)} className="border-b">
                   <td className="py-2">{f.name}</td>
                   <td>{f.city_zone}</td>
-                  <td><span className="rounded bg-red-100 px-2 py-1 text-red-700">{f.current_month}</span></td>
+                  <td>
+                    <span className="rounded bg-red-100 px-2 py-1 text-red-700">{f.current_month}</span>
+                  </td>
                   <td>{f.previous_month}</td>
+                  <td>
+                    {f.drop_percentage != null ? (
+                      <span className="text-xs font-semibold text-amber-800">{f.drop_percentage}% drop</span>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
