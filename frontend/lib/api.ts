@@ -8,7 +8,7 @@ export const API_BASE = {
 
 export function getToken() {
   if (typeof window === 'undefined') return '';
-  return localStorage.getItem('fairgig_access_token') || '';
+  return localStorage.getItem('fairgig_access_token') || localStorage.getItem('fairgig_token') || '';
 }
 
 export async function authFetch(url: string, options: RequestInit = {}) {

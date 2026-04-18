@@ -13,7 +13,34 @@ const app = express();
 const PORT = 8002;
 const uploadDir = path.resolve('earnings-service/uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
-const upload = multer({ dest: uploadDir });
+const uploadScreenshot = multer({
+  dest: uploadDir,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.mimetype)) {
+      cb(new Error('Unsupported screenshot file type. Allowed: JPG, PNG, WEBP'));
+      return;
+    }
+    cb(null, true);
+  },
+});
+const uploadCsv = multer({
+  dest: uploadDir,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const lower = (file.originalname || '').toLowerCase();
+    const isCsvMime = file.mimetype.includes('csv') || file.mimetype === 'application/vnd.ms-excel';
+    if (!(lower.endsWith('.csv') || isCsvMime)) {
+      cb(new Error('Only CSV files are supported for import'));
+      return;
+    }
+    cb(null, true);
+  },
+});
+const supabaseUrl = process.env.SUPABASE_URL || 'https://rboeauycggsgtdhuipah.supabase.co';
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseBucket = process.env.SUPABASE_BUCKET || 'gig';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -23,6 +50,89 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(uploadDir));
+
+function validateSupabaseConfig() {
+  if (!supabaseServiceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing. Set the service_role key in .env for earnings-service screenshot uploads.');
+  }
+  if (supabaseServiceRoleKey.startsWith('sb_publishable_')) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is a publishable key. Use the Supabase service_role key instead.');
+  }
+}
+
+async function ensureDailyHoursWithinLimit(
+  workerId: string,
+  shiftDate: string,
+  hoursWorked: number,
+  excludeShiftId?: string,
+) {
+  const params: unknown[] = [workerId, shiftDate];
+  let query = `
+    SELECT COALESCE(SUM(hours_worked), 0)::float8 AS total_hours
+    FROM earnings.shifts
+    WHERE worker_id = $1
+      AND shift_date = $2
+      AND deleted_at IS NULL
+  `;
+
+  if (excludeShiftId) {
+    params.push(excludeShiftId);
+    query += ` AND id != $3`;
+  }
+
+  const result = await pool.query(query, params);
+  const existingHours = Number(result.rows[0]?.total_hours || 0);
+  const nextTotal = existingHours + Number(hoursWorked);
+
+  if (nextTotal > 24) {
+    throw new Error(`Total hours for ${shiftDate} would be ${nextTotal.toFixed(2)}. Daily limit is 24 hours.`);
+  }
+}
+
+async function uploadScreenshotToSupabase(
+  filePath: string,
+  originalFileName: string,
+  workerId: string,
+  shiftId: string,
+  mimeType: string,
+) {
+  if (!supabaseServiceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing on earnings service');
+  }
+  if (supabaseServiceRoleKey.startsWith('sb_publishable_')) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is set to a publishable key. Use the service_role key from Supabase project settings.');
+  }
+
+  const safeName = (originalFileName || 'screenshot.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const objectPath = `${workerId}/${shiftId}-${Date.now()}-${safeName}`;
+  const encodedPath = objectPath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  const buffer = fs.readFileSync(filePath);
+
+  const uploadRes = await fetch(`${supabaseUrl}/storage/v1/object/${supabaseBucket}/${encodedPath}`, {
+    method: 'POST',
+    headers: {
+      apikey: supabaseServiceRoleKey,
+      Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      'Content-Type': mimeType || 'application/octet-stream',
+      'x-upsert': 'false',
+    },
+    body: buffer,
+  });
+
+  if (!uploadRes.ok) {
+    const message = await uploadRes.text();
+    throw new Error(message || 'Supabase storage upload failed');
+  }
+
+  return {
+    fileName: safeName,
+    fileUrl: `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${encodedPath}`,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // GET /shifts — list shifts (soft-delete aware)
@@ -71,6 +181,8 @@ app.post('/shifts', async (req, res) => {
   } = req.body;
 
   try {
+    await ensureDailyHoursWithinLimit(worker_id, shift_date, Number(hours_worked));
+
     const result = await pool.query(
       `INSERT INTO earnings.shifts
        (worker_id, platform, shift_date, hours_worked,
@@ -93,7 +205,17 @@ app.post('/shifts', async (req, res) => {
 // ---------------------------------------------------------------------------
 app.put('/shifts/:id', async (req, res) => {
   const { id } = req.params;
-  const { platform, shift_date, hours_worked, gross_earned, platform_deductions, net_received, notes } = req.body;
+  const { worker_id, platform, shift_date, hours_worked, gross_earned, platform_deductions, net_received, notes } = req.body;
+
+  if (!worker_id) {
+    return res.status(400).json({ detail: 'worker_id is required' });
+  }
+
+  try {
+    await ensureDailyHoursWithinLimit(String(worker_id), String(shift_date), Number(hours_worked), id);
+  } catch (err: any) {
+    return res.status(400).json({ detail: err.message });
+  }
 
   const result = await pool.query(
     `UPDATE earnings.shifts
@@ -104,13 +226,16 @@ app.put('/shifts/:id', async (req, res) => {
          platform_deductions = $5,
          net_received = $6,
          notes = $7
-     WHERE id = $8 AND deleted_at IS NULL
+     WHERE id = $8
+       AND worker_id = $9
+       AND verification_status = 'pending'
+       AND deleted_at IS NULL
      RETURNING *`,
-    [platform, shift_date, hours_worked, gross_earned, platform_deductions, net_received, notes || null, id],
+    [platform, shift_date, hours_worked, gross_earned, platform_deductions, net_received, notes || null, id, worker_id],
   );
 
   if (!result.rows.length) {
-    return res.status(404).json({ detail: 'Shift not found' });
+    return res.status(404).json({ detail: 'Shift not found or cannot be edited after review' });
   }
   res.json(result.rows[0]);
 });
@@ -123,16 +248,22 @@ app.delete('/shifts/:id', async (req, res) => {
   const { worker_id } = req.body;
 
   if (!worker_id) {
-    // Fallback: soft-delete without ownership check
-    await pool.query(
-      `UPDATE earnings.shifts SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-  } else {
-    await pool.query(
-      `SELECT soft_delete_shift($1::UUID, $2::UUID)`,
-      [id, worker_id],
-    );
+    return res.status(400).json({ detail: 'worker_id is required' });
+  }
+
+  const result = await pool.query(
+    `UPDATE earnings.shifts
+     SET deleted_at = NOW()
+     WHERE id = $1
+       AND worker_id = $2
+       AND verification_status = 'pending'
+       AND deleted_at IS NULL
+     RETURNING id`,
+    [id, worker_id],
+  );
+
+  if (!result.rows.length) {
+    return res.status(404).json({ detail: 'Shift not found or cannot be deleted after review' });
   }
 
   res.json({ status: 'ok' });
@@ -141,7 +272,7 @@ app.delete('/shifts/:id', async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /shifts/import-csv — CSV import with tracking
 // ---------------------------------------------------------------------------
-app.post('/shifts/import-csv', upload.single('file'), async (req, res) => {
+app.post('/shifts/import-csv', uploadCsv.single('file'), async (req, res) => {
   const file = req.file;
   const workerId = req.body.worker_id;
 
@@ -174,6 +305,8 @@ app.post('/shifts/import-csv', upload.single('file'), async (req, res) => {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     try {
+      await ensureDailyHoursWithinLimit(workerId, String(row.shift_date), Number(row.hours_worked));
+
       await pool.query(
         `INSERT INTO earnings.shifts
          (worker_id, platform, shift_date, hours_worked,
@@ -221,33 +354,72 @@ app.post('/shifts/import-csv', upload.single('file'), async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /shifts/:id/screenshot — upload to shift_screenshots table
 // ---------------------------------------------------------------------------
-app.post('/shifts/:id/screenshot', upload.single('file'), async (req, res) => {
+app.post('/shifts/:id/screenshot', uploadScreenshot.single('file'), async (req, res) => {
   const { id } = req.params;
   const file = req.file;
   const worker_id = req.body.worker_id;
+  const screenshot_url = req.body.screenshot_url;
 
-  if (!file) {
-    return res.status(400).json({ detail: 'file is required' });
+  if (!worker_id) {
+    return res.status(400).json({ detail: 'worker_id is required' });
   }
 
-  const relativeUrl = `/uploads/${path.basename(file.path)}`;
-
-  // Determine mime_type
-  const ext = path.extname(file.originalname || '').toLowerCase();
-  const mimeMap: Record<string, string> = {
+  const extToMime: Record<string, string> = {
     '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.png': 'image/png', '.webp': 'image/webp',
   };
-  const mimeType = mimeMap[ext] || 'image/jpeg';
+
+  let fileUrl = '';
+  let fileName = '';
+  let fileSize: number | null = null;
+  let mimeType = 'image/jpeg';
+
+  if (!file && !screenshot_url) {
+    return res.status(400).json({ detail: 'file or screenshot_url is required' });
+  }
+
+  if (screenshot_url && !file) {
+    fileUrl = String(screenshot_url);
+    fileName = req.body.file_name || path.basename(fileUrl);
+    const urlExt = path.extname(fileName || '').toLowerCase();
+    mimeType = extToMime[urlExt] || 'image/jpeg';
+  }
+
+  if (file) {
+    fileName = file.originalname || file.filename;
+    fileSize = file.size;
+
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    mimeType = extToMime[ext] || 'image/jpeg';
+
+    try {
+      const uploaded = await uploadScreenshotToSupabase(file.path, fileName, String(worker_id), id, mimeType);
+      fileUrl = uploaded.fileUrl;
+      fileName = uploaded.fileName;
+      fs.unlinkSync(file.path);
+    } catch (uploadErr: any) {
+      console.error('Supabase screenshot upload error:', uploadErr.message);
+      return res.status(502).json({
+        detail: `Screenshot upload failed on earnings service: ${uploadErr.message}`,
+      });
+    }
+  }
 
   try {
+    await pool.query(
+      `UPDATE earnings.shift_screenshots
+       SET is_primary = FALSE
+       WHERE shift_id = $1 AND is_primary = TRUE`,
+      [id],
+    );
+
     // Insert into shift_screenshots (trigger sync_has_screenshot updates the shift)
     const result = await pool.query(
       `INSERT INTO earnings.shift_screenshots
        (shift_id, worker_id, file_url, file_name, file_size_bytes, mime_type, is_primary)
        VALUES ($1, $2, $3, $4, $5, $6::TEXT, TRUE)
        RETURNING *`,
-      [id, worker_id || null, relativeUrl, file.originalname || file.filename, file.size, mimeType],
+      [id, worker_id, fileUrl, fileName, fileSize, mimeType],
     );
 
     res.status(201).json(result.rows[0]);
@@ -318,6 +490,30 @@ app.get('/shifts/income-certificate', async (req, res) => {
   });
 });
 
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ detail: 'Uploaded file is too large' });
+    }
+    return res.status(400).json({ detail: err.message });
+  }
+
+  if (err && err.message && err.message.includes('Unsupported screenshot file type')) {
+    return res.status(400).json({ detail: err.message });
+  }
+  if (err && err.message && err.message.includes('Only CSV files are supported')) {
+    return res.status(400).json({ detail: err.message });
+  }
+
+  return next(err);
+});
+
 app.listen(PORT, () => {
+  try {
+    validateSupabaseConfig();
+  } catch (configErr: any) {
+    console.error(`❌ Earnings Service config error: ${configErr.message}`);
+    process.exit(1);
+  }
   console.log(`Earnings Service running on port ${PORT}`);
 });
