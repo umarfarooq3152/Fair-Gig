@@ -1,634 +1,875 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+import { FormEvent, useMemo, useState } from 'react';
 
-import React, { useState, useEffect } from 'react';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, LineChart, Line, Cell
-} from 'recharts';
-import { 
-  LayoutDashboard, 
-  History, 
-  AlertTriangle, 
-  FileText, 
-  CheckCircle2, 
-  ExternalLink,
-  ChevronRight,
-  Plus,
-  ArrowUpRight,
-  TrendingDown,
-  User,
-  LogOut
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+type UserRole = 'worker' | 'verifier' | 'advocate';
 
-// --- Types ---
-interface Shift {
+type AuthUser = {
   id: string;
-  platform: 'Careem' | 'Bykea' | 'foodpanda' | 'Upwork';
+  name: string;
+  email: string;
+  role: UserRole;
+  city_zone?: string | null;
+  category?: string | null;
+};
+
+type Shift = {
+  id: string;
+  worker_id?: string;
+  worker_name?: string;
+  verifier_id?: string | null;
+  verifier_note?: string | null;
+  screenshot_url?: string | null;
+  deduction_rate?: number;
+  created_at?: string;
+  platform: string;
   shift_date: string;
   hours_worked: number;
   gross_earned: number;
   platform_deductions: number;
   net_received: number;
-  verification_status: 'pending' | 'verified' | 'flagged';
-}
-
-interface UserProfile {
-  name: string;
-  id: string;
-  role: 'worker' | 'verifier' | 'advocate';
-  city_zone: string;
-  category: string;
-}
-
-// --- Mock Data ---
-const MOCK_USER: UserProfile = {
-  name: "Muhammad Ali",
-  id: "GW-2025-00432",
-  role: 'worker',
-  city_zone: "DHA Lahore",
-  category: "Ride-Hailing"
+  notes?: string | null;
+  verification_status: string;
 };
 
-const MOCK_SHIFTS: Shift[] = [
-  { id: '1', platform: 'Careem', shift_date: '2025-01-28', hours_worked: 6, gross_earned: 2100, platform_deductions: 420, net_received: 1680, verification_status: 'verified' },
-  { id: '2', platform: 'Bykea', shift_date: '2025-01-27', hours_worked: 4, gross_earned: 1450, platform_deductions: 280, net_received: 1170, verification_status: 'verified' },
-  { id: '3', platform: 'Careem', shift_date: '2025-01-27', hours_worked: 8, gross_earned: 3200, platform_deductions: 1120, net_received: 2080, verification_status: 'verified' },
-  { id: '4', platform: 'foodpanda', shift_date: '2025-01-26', hours_worked: 5, gross_earned: 1800, platform_deductions: 630, net_received: 1170, verification_status: 'pending' },
-];
+type RegisterForm = {
+  name: string;
+  email: string;
+  password: string;
+  role: UserRole;
+  city_zone: string;
+  category: string;
+  phone: string;
+};
 
-const EARNINGS_TREND = [
-  { name: 'Jan 22', value: 2400 },
-  { name: 'Jan 23', value: 3600 },
-  { name: 'Jan 24', value: 2700 },
-  { name: 'Jan 25', value: 4200 },
-  { name: 'Jan 26', value: 5100 },
-  { name: 'Jan 27', value: 3900 },
-  { name: 'Jan 28', value: 3100 },
-];
+type ShiftForm = {
+  platform: string;
+  shift_date: string;
+  hours_worked: string;
+  gross_earned: string;
+  platform_deductions: string;
+  notes: string;
+};
+
+type VerifierQueueItem = {
+  shift_id: string;
+  worker_id: string;
+  worker_name: string;
+  city_zone?: string | null;
+  category?: string | null;
+  platform: string;
+  shift_date: string;
+  hours_worked: number;
+  gross_earned: number;
+  platform_deductions: number;
+  net_received: number;
+  deduction_rate: number;
+  screenshot_url?: string | null;
+  submitted_at: string;
+};
+
+const roles: UserRole[] = ['worker', 'verifier', 'advocate'];
+const zones = ['Gulberg', 'DHA', 'Saddar', 'Johar Town', 'Cantt', 'Other'];
+const categories = ['ride_hailing', 'food_delivery', 'freelance', 'domestic'];
+const platforms = ['Careem', 'Bykea', 'foodpanda', 'Upwork', 'Other'];
+
+const env = (import.meta as any).env || {};
+const authBases = env.VITE_AUTH_BASE_URL ? [env.VITE_AUTH_BASE_URL] : ['/api/auth', 'http://localhost:8001/auth'];
+const earningsBases = env.VITE_EARNINGS_BASE_URL ? [env.VITE_EARNINGS_BASE_URL] : ['/api/shifts', 'http://localhost:8002/shifts'];
+const verifierBases = env.VITE_VERIFIER_BASE_URL ? [env.VITE_VERIFIER_BASE_URL] : ['/api/verifier', 'http://localhost:8002/verifier'];
+
+function joinBase(base: string, endpoint: string) {
+  const normalizedBase = base.replace(/\/+$/, '');
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${normalizedBase}${normalizedEndpoint}`;
+}
+
+async function parseJsonSafe(response: Response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
+
+async function fetchWithFallback(
+  bases: string[],
+  endpoint: string,
+  options?: RequestInit,
+): Promise<{ response: Response; payload: any }> {
+  let lastError: unknown;
+
+  for (const base of bases) {
+    try {
+      const response = await fetch(joinBase(base, endpoint), options);
+      const payload = await parseJsonSafe(response);
+
+      // If mounted proxy path is wrong in current runtime, try direct service URL fallback.
+      if (response.status === 404 && bases.length > 1) {
+        continue;
+      }
+
+      return { response, payload };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('All API endpoints failed');
+}
+
+function getErrorMessage(payload: any, fallback: string) {
+  return payload?.detail || payload?.message || fallback;
+}
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'shifts' | 'grievances' | 'certificate' | 'analytics'>('dashboard');
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [token, setToken] = useState(localStorage.getItem('fairgig_token'));
+  const [userId, setUserId] = useState(localStorage.getItem('fairgig_user_id'));
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('fairgig_token'));
-  const [anomaly, setAnomaly] = useState<any>(null);
-  const [median, setMedian] = useState<number>(260);
-  const [distributionData, setDistributionData] = useState<any[]>([]);
-  const [trendsData, setTrendsData] = useState<any[]>([]);
-  const [vulnerabilityData, setVulnerabilityData] = useState<any[]>([]);
-  const [topComplaintsData, setTopComplaintsData] = useState<any[]>([]);
+  const [verifierQueue, setVerifierQueue] = useState<VerifierQueueItem[]>([]);
+  const [myReviewedShifts, setMyReviewedShifts] = useState<Shift[]>([]);
+  const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
+  const [decisionLoadingId, setDecisionLoadingId] = useState<string | null>(null);
+  const [decisionError, setDecisionError] = useState('');
+  const [decisionSuccess, setDecisionSuccess] = useState('');
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [earningsError, setEarningsError] = useState('');
+  const [earningsSuccess, setEarningsSuccess] = useState('');
 
-  // Auto-login for demo if no token
-  useEffect(() => {
-    if (!token) {
-      handleLogin('worker1@fairgig.demo', 'password123');
-    } else {
-      fetchInitialData();
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [registerForm, setRegisterForm] = useState<RegisterForm>({
+    name: '',
+    email: '',
+    password: '',
+    role: 'worker',
+    city_zone: 'DHA',
+    category: 'ride_hailing',
+    phone: '',
+  });
+
+  const [shiftForm, setShiftForm] = useState<ShiftForm>({
+    platform: 'Careem',
+    shift_date: new Date().toISOString().slice(0, 10),
+    hours_worked: '8',
+    gross_earned: '2400',
+    platform_deductions: '600',
+    notes: '',
+  });
+
+  const netPreview = useMemo(() => {
+    const gross = Number(shiftForm.gross_earned);
+    const deductions = Number(shiftForm.platform_deductions);
+    if (Number.isNaN(gross) || Number.isNaN(deductions)) {
+      return 0;
     }
-  }, [token]);
+    return Math.max(0, gross - deductions);
+  }, [shiftForm.gross_earned, shiftForm.platform_deductions]);
 
-  const handleLogin = async (email: string, pass: string) => {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pass })
-      });
-      const data = await res.json();
-      if (data.access_token) {
-        localStorage.setItem('fairgig_token', data.access_token);
-        localStorage.setItem('fairgig_user_id', data.user_id);
-        setToken(data.access_token);
-      }
-    } catch (e) {
-      console.error('Login failed', e);
+  const pendingByWorker = useMemo(() => {
+    const grouped: Record<string, VerifierQueueItem[]> = {};
+    for (const item of verifierQueue) {
+      const key = `${item.worker_name} (${item.worker_id.slice(0, 8)})`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(item);
     }
-  };
+    return grouped;
+  }, [verifierQueue]);
 
-  const fetchInitialData = async () => {
-    setLoading(true);
-    const userId = localStorage.getItem('fairgig_user_id');
+  const myReviewedByWorker = useMemo(() => {
+    const grouped: Record<string, Shift[]> = {};
+    for (const item of myReviewedShifts) {
+      const name = item.worker_name || 'Unknown Worker';
+      const idPart = item.worker_id ? item.worker_id.slice(0, 8) : 'unknown';
+      const key = `${name} (${idPart})`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(item);
+    }
+    return grouped;
+  }, [myReviewedShifts]);
+
+  async function fetchProfile(authToken: string, currentUserId: string) {
     try {
-      // Fetch Shifts
-      const sRes = await fetch(`/api/shifts?worker_id=${userId}`);
-      const sData = await sRes.json();
-      setShifts(sData);
-
-      // Fetch Anomaly
-      const aRes = await fetch('/api/anomaly/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worker_id: userId, earnings: sData.slice(0, 10) })
+      const { response: meRes, payload: mePayload } = await fetchWithFallback(authBases, '/me', {
+        headers: { Authorization: `Bearer ${authToken}` },
       });
-      const aData = await aRes.json();
-      setAnomaly(aData);
+      if (meRes.ok) {
+        setUser(mePayload);
 
-      // Fetch User Info
-      const uRes = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (uRes.ok) {
-        const uData = await uRes.json();
-        setUser(uData);
+        if (mePayload.role === 'verifier') {
+          const { response: shiftsRes, payload: shiftsPayload } = await fetchWithFallback(earningsBases, '');
+          if (shiftsRes.ok && Array.isArray(shiftsPayload)) {
+            const pending = shiftsPayload
+              .filter((s: Shift) => s.verification_status === 'pending')
+              .map((s: Shift): VerifierQueueItem => ({
+                shift_id: s.id,
+                worker_id: s.worker_id || 'unknown',
+                worker_name: s.worker_name || 'Unknown Worker',
+                city_zone: null,
+                category: null,
+                platform: s.platform,
+                shift_date: s.shift_date,
+                hours_worked: s.hours_worked,
+                gross_earned: s.gross_earned,
+                platform_deductions: s.platform_deductions,
+                net_received: s.net_received,
+                deduction_rate: Number(s.deduction_rate || 0),
+                screenshot_url: s.screenshot_url || null,
+                submitted_at: s.created_at || s.shift_date,
+              }));
+
+            const mine = shiftsPayload.filter(
+              (s: Shift) => s.verifier_id === mePayload.id && s.verification_status !== 'pending',
+            );
+            setVerifierQueue(pending);
+            setMyReviewedShifts(mine);
+          } else {
+            setVerifierQueue([]);
+            setMyReviewedShifts([]);
+          }
+          setShifts([]);
+          return;
+        }
+
+        setVerifierQueue([]);
+        setMyReviewedShifts([]);
       } else {
-        // Fallback for demo
-        setUser({ ...MOCK_USER, id: userId || 'worker-1' });
+        setUser(null);
       }
 
-      // Fetch Median
-      const mRes = await fetch(`/api/analytics/median/ride_hailing/DHA`);
-      const mData = await mRes.json();
-      setMedian(mData.median_hourly);
-
-      // Fetch Income Distribution (for all zones)
-      const distRes = await fetch('/api/analytics/income-distribution');
-      const distData = await distRes.json();
-      setDistributionData(distData);
-
-      // Fetch Commission Trends
-      const trendsRes = await fetch('/api/analytics/commission-trends');
-      setTrendsData(await trendsRes.json());
-
-      // Fetch Vulnerability Flags
-      const vulnRes = await fetch('/api/analytics/vulnerability-flags');
-      setVulnerabilityData(await vulnRes.json());
-
-      // Fetch Top Complaints
-      const compRes = await fetch('/api/analytics/top-complaints');
-      setTopComplaintsData(await compRes.json());
-
-    } catch (e) {
-      console.error('Data fetch failed', e);
-    } finally {
-      setLoading(false);
+      const { response: shiftsRes, payload: shiftsPayload } = await fetchWithFallback(
+        earningsBases,
+        `?worker_id=${encodeURIComponent(currentUserId)}`,
+      );
+      if (shiftsRes.ok) {
+        setShifts(shiftsPayload);
+      } else {
+        setShifts([]);
+      }
+    } catch {
+      setUser(null);
+      setShifts([]);
+      setVerifierQueue([]);
+      setMyReviewedShifts([]);
     }
-  };
+  }
 
-  if (loading) return <div className="flex items-center justify-center h-screen font-black text-brand animate-pulse">FAIRGIG INITIALIZING...</div>;
+  async function handleVerifierDecision(shiftId: string, status: 'verified' | 'flagged' | 'unverifiable') {
+    if (!user?.id) {
+      setDecisionError('Verifier user id not available');
+      return;
+    }
 
-  // Stats calculation
-  const totalVerifiedNet = shifts.filter(s => s.verification_status === 'verified').reduce((acc, curr) => acc + curr.net_received, 0);
-  const totalHours = shifts.filter(s => s.verification_status === 'verified').reduce((acc, curr) => acc + curr.hours_worked, 0);
-  const avgHourlyRate = totalHours > 0 ? totalVerifiedNet / totalHours : 0;
+    setDecisionLoadingId(shiftId);
+    setDecisionError('');
+    setDecisionSuccess('');
+
+    try {
+      const { response, payload } = await fetchWithFallback(verifierBases, `/${shiftId}/decision`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          verifier_id: user.id,
+          verifier_note: decisionNotes[shiftId] || '',
+        }),
+      });
+
+      if (!response.ok) {
+        setDecisionError(getErrorMessage(payload, 'Could not update verification decision'));
+        return;
+      }
+
+      setDecisionSuccess(`Shift ${status} successfully`);
+      if (token && userId) {
+        await fetchProfile(token, userId);
+      }
+    } catch {
+      setDecisionError('Unable to connect to verifier service');
+    } finally {
+      setDecisionLoadingId(null);
+    }
+  }
+
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const { response: res, payload } = await fetchWithFallback(authBases, '/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm),
+      });
+      if (!res.ok) {
+        setAuthError(getErrorMessage(payload, 'Login failed'));
+        return;
+      }
+
+      localStorage.setItem('fairgig_token', payload.access_token);
+      localStorage.setItem('fairgig_user_id', payload.user_id);
+      setToken(payload.access_token);
+      setUserId(payload.user_id);
+      await fetchProfile(payload.access_token, payload.user_id);
+    } catch {
+      setAuthError('Unable to connect to auth service');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleSignup(e: FormEvent) {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const registerPayload: Record<string, string> = {
+        name: registerForm.name,
+        email: registerForm.email,
+        password: registerForm.password,
+        role: registerForm.role,
+      };
+
+      if (registerForm.role === 'worker') {
+        registerPayload.city_zone = registerForm.city_zone;
+        registerPayload.category = registerForm.category;
+        registerPayload.phone = registerForm.phone;
+      }
+
+      const { response: registerRes, payload: registerData } = await fetchWithFallback(authBases, '/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registerPayload),
+      });
+
+      if (!registerRes.ok) {
+        setAuthError(getErrorMessage(registerData, 'Signup failed'));
+        return;
+      }
+
+      const { response: loginRes, payload: loginData } = await fetchWithFallback(authBases, '/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: registerForm.email,
+          password: registerForm.password,
+        }),
+      });
+      if (!loginRes.ok) {
+        setAuthError(getErrorMessage(loginData, 'Signup complete but auto-login failed'));
+        return;
+      }
+
+      localStorage.setItem('fairgig_token', loginData.access_token);
+      localStorage.setItem('fairgig_user_id', loginData.user_id);
+      setToken(loginData.access_token);
+      setUserId(loginData.user_id);
+      await fetchProfile(loginData.access_token, loginData.user_id);
+    } catch {
+      setAuthError('Unable to connect to auth service');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleAddEarning(e: FormEvent) {
+    e.preventDefault();
+
+    if (!userId) {
+      setEarningsError('You must be logged in before adding earnings');
+      return;
+    }
+
+    const payload = {
+      worker_id: userId,
+      platform: shiftForm.platform,
+      shift_date: shiftForm.shift_date,
+      hours_worked: Number(shiftForm.hours_worked),
+      gross_earned: Number(shiftForm.gross_earned),
+      platform_deductions: Number(shiftForm.platform_deductions),
+      net_received: Number((Number(shiftForm.gross_earned) - Number(shiftForm.platform_deductions)).toFixed(2)),
+      notes: shiftForm.notes || null,
+    };
+
+    if (payload.gross_earned < 0 || payload.platform_deductions < 0 || payload.hours_worked <= 0) {
+      setEarningsError('Hours must be > 0, and amounts cannot be negative');
+      return;
+    }
+
+    setEarningsLoading(true);
+    setEarningsError('');
+    setEarningsSuccess('');
+
+    try {
+      const { response: res, payload: data } = await fetchWithFallback(earningsBases, '', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        setEarningsError(getErrorMessage(data, 'Could not add earning'));
+        return;
+      }
+
+      setEarningsSuccess('Earning added successfully');
+      setShifts((prev) => [data, ...prev]);
+      setShiftForm((prev) => ({ ...prev, notes: '' }));
+    } catch {
+      setEarningsError('Unable to connect to earnings service');
+    } finally {
+      setEarningsLoading(false);
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('fairgig_token');
+    localStorage.removeItem('fairgig_user_id');
+    setToken(null);
+    setUserId(null);
+    setUser(null);
+    setShifts([]);
+    setVerifierQueue([]);
+    setMyReviewedShifts([]);
+    setDecisionNotes({});
+    setDecisionError('');
+    setDecisionSuccess('');
+    setAuthError('');
+    setEarningsError('');
+    setEarningsSuccess('');
+  }
+
+  if (token && userId && !user) {
+    void fetchProfile(token, userId);
+  }
+
+  if (!token || !userId) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-emerald-100 via-white to-cyan-100 px-4 py-10">
+        <div className="mx-auto max-w-5xl rounded-3xl border border-emerald-200 bg-white/90 p-6 shadow-xl backdrop-blur sm:p-10">
+          <div className="grid gap-8 md:grid-cols-2">
+            <section>
+              <p className="mb-2 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">FairGig Startup</p>
+              <h1 className="text-3xl font-black text-slate-900 sm:text-4xl">Login or Sign Up to Continue</h1>
+              <p className="mt-3 text-sm text-slate-600">
+                Choose your role while signing up, and start tracking verified gig earnings from day one.
+              </p>
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                Duplicate email protection is enabled. You cannot create two accounts with the same email.
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-5 flex gap-2 rounded-xl bg-slate-100 p-1">
+                <button
+                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${mode === 'login' ? 'bg-white text-slate-900 shadow' : 'text-slate-600'}`}
+                  onClick={() => {
+                    setMode('login');
+                    setAuthError('');
+                  }}
+                  type="button"
+                >
+                  Login
+                </button>
+                <button
+                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold transition ${mode === 'signup' ? 'bg-white text-slate-900 shadow' : 'text-slate-600'}`}
+                  onClick={() => {
+                    setMode('signup');
+                    setAuthError('');
+                  }}
+                  type="button"
+                >
+                  Sign Up
+                </button>
+              </div>
+
+              {mode === 'login' ? (
+                <form className="space-y-3" onSubmit={handleLogin}>
+                  <input
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Email"
+                    type="email"
+                    required
+                    value={loginForm.email}
+                    onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
+                  />
+                  <input
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Password"
+                    type="password"
+                    required
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
+                  />
+                  <button
+                    className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                    type="submit"
+                    disabled={authLoading}
+                  >
+                    {authLoading ? 'Logging in...' : 'Login'}
+                  </button>
+                </form>
+              ) : (
+                <form className="space-y-3" onSubmit={handleSignup}>
+                  <input
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Full Name"
+                    required
+                    value={registerForm.name}
+                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, name: e.target.value }))}
+                  />
+                  <input
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Email"
+                    type="email"
+                    required
+                    value={registerForm.email}
+                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, email: e.target.value }))}
+                  />
+                  <input
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Password"
+                    type="password"
+                    minLength={6}
+                    required
+                    value={registerForm.password}
+                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, password: e.target.value }))}
+                  />
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Role</label>
+                  <select
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={registerForm.role}
+                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, role: e.target.value as UserRole }))}
+                  >
+                    {roles.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+
+                  {registerForm.role === 'worker' && (
+                    <>
+                      <select
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={registerForm.city_zone}
+                        onChange={(e) => setRegisterForm((prev) => ({ ...prev, city_zone: e.target.value }))}
+                      >
+                        {zones.map((zone) => (
+                          <option key={zone} value={zone}>
+                            {zone}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        value={registerForm.category}
+                        onChange={(e) => setRegisterForm((prev) => ({ ...prev, category: e.target.value }))}
+                      >
+                        {categories.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        placeholder="Phone Number (optional)"
+                        value={registerForm.phone}
+                        onChange={(e) => setRegisterForm((prev) => ({ ...prev, phone: e.target.value }))}
+                      />
+                    </>
+                  )}
+
+                  <button
+                    className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                    type="submit"
+                    disabled={authLoading}
+                  >
+                    {authLoading ? 'Creating account...' : 'Create Account'}
+                  </button>
+                </form>
+              )}
+
+              {authError && <p className="mt-3 text-sm font-medium text-red-600">{authError}</p>}
+            </section>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const visibleShifts = shifts.slice(0, 8);
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* Header */}
-      <header className="bg-card border-b border-border-dim px-8 h-16 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-8">
-          <div className="text-2xl font-black tracking-tighter text-brand flex items-center gap-2">
-            <LayoutDashboard className="w-6 h-6" />
-            FairGig
+    <main className="min-h-screen bg-slate-100 px-4 py-8">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900">Earnings Service</h1>
+            <p className="text-sm text-slate-600">
+              Logged in as <span className="font-semibold">{user?.name || 'User'}</span> ({user?.role || 'unknown'})
+            </p>
           </div>
-          <nav className="flex gap-6">
-            {(user?.role === 'advocate' 
-              ? ['dashboard', 'analytics', 'grievances'] 
-              : ['dashboard', 'shifts', 'grievances', 'certificate']
-            ).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab as any)}
-                className={`text-sm font-semibold capitalize pt-1 pb-1 transition-all relative ${
-                  activeTab === tab ? 'text-text-main' : 'text-text-muted hover:text-text-main'
-                }`}
+          <button
+            type="button"
+            onClick={logout}
+            className="mt-3 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 sm:mt-0"
+          >
+            Logout
+          </button>
+        </header>
+
+        {user?.role === 'worker' ? (
+          <section className="grid gap-6 lg:grid-cols-2">
+            <form onSubmit={handleAddEarning} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900">Add New Earning</h2>
+
+              <label className="block text-sm font-medium text-slate-700">Platform</label>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                value={shiftForm.platform}
+                onChange={(e) => setShiftForm((prev) => ({ ...prev, platform: e.target.value }))}
               >
-                {tab}
-                {activeTab === tab && (
-                  <motion.div layoutId="nav-underline" className="absolute bottom-[-1.5rem] left-0 right-0 h-0.5 bg-brand" />
-                )}
+                {platforms.map((platform) => (
+                  <option key={platform} value={platform}>
+                    {platform}
+                  </option>
+                ))}
+              </select>
+
+              <label className="block text-sm font-medium text-slate-700">Shift Date</label>
+              <input
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                type="date"
+                required
+                value={shiftForm.shift_date}
+                onChange={(e) => setShiftForm((prev) => ({ ...prev, shift_date: e.target.value }))}
+              />
+
+              <label className="block text-sm font-medium text-slate-700">Hours Worked</label>
+              <input
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                type="number"
+                step="0.1"
+                min="0.1"
+                required
+                value={shiftForm.hours_worked}
+                onChange={(e) => setShiftForm((prev) => ({ ...prev, hours_worked: e.target.value }))}
+              />
+
+              <label className="block text-sm font-medium text-slate-700">Gross Earned (PKR)</label>
+              <input
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                value={shiftForm.gross_earned}
+                onChange={(e) => setShiftForm((prev) => ({ ...prev, gross_earned: e.target.value }))}
+              />
+
+              <label className="block text-sm font-medium text-slate-700">Platform Deductions (PKR)</label>
+              <input
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                value={shiftForm.platform_deductions}
+                onChange={(e) => setShiftForm((prev) => ({ ...prev, platform_deductions: e.target.value }))}
+              />
+
+              <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                Net Received (auto): PKR {netPreview.toFixed(2)}
+              </div>
+
+              <label className="block text-sm font-medium text-slate-700">Notes</label>
+              <textarea
+                className="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                value={shiftForm.notes}
+                onChange={(e) => setShiftForm((prev) => ({ ...prev, notes: e.target.value }))}
+              />
+
+              <button
+                className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                type="submit"
+                disabled={earningsLoading}
+              >
+                {earningsLoading ? 'Saving...' : 'Add Earning'}
               </button>
-            ))}
-          </nav>
-        </div>
 
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <div className="text-sm font-bold text-text-main">{MOCK_USER.name}</div>
-            <div className="text-[10px] text-text-muted tracking-wide">ID: {MOCK_USER.id}</div>
-          </div>
-          <div className="w-9 h-9 bg-gray-100 border border-border-dim rounded-full flex items-center justify-center">
-            <User className="w-5 h-5 text-text-muted" />
-          </div>
-        </div>
-      </header>
+              {earningsError && <p className="text-sm font-medium text-red-600">{earningsError}</p>}
+              {earningsSuccess && <p className="text-sm font-medium text-emerald-700">{earningsSuccess}</p>}
+            </form>
 
-      {/* Main Content */}
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
-        <AnimatePresence mode="wait">
-          {activeTab === 'dashboard' && (
-            <motion.div
-              key="dashboard"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="grid grid-cols-1 md:grid-cols-4 gap-5"
-            >
-              {/* Hero Chart Card */}
-              <div className="card-bento md:col-span-2 md:row-span-2">
-                <div className="flex justify-between mb-4">
-                  <div className="card-title-bento">Earnings Overview (30D)</div>
-                  <div className="text-[10px] font-bold text-brand bg-brand/10 px-2 py-0.5 rounded-full">+12.5%</div>
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-3 text-lg font-bold text-slate-900">Recent Earnings</h2>
+              {visibleShifts.length === 0 ? (
+                <p className="text-sm text-slate-600">No shifts found yet. Add your first earning entry.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500">
+                        <th className="px-2 py-2">Date</th>
+                        <th className="px-2 py-2">Platform</th>
+                        <th className="px-2 py-2">Hours</th>
+                        <th className="px-2 py-2">Net</th>
+                        <th className="px-2 py-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {visibleShifts.map((shift) => (
+                        <tr key={shift.id}>
+                          <td className="px-2 py-2">{shift.shift_date}</td>
+                          <td className="px-2 py-2">{shift.platform}</td>
+                          <td className="px-2 py-2">{shift.hours_worked}</td>
+                          <td className="px-2 py-2">PKR {Number(shift.net_received).toFixed(2)}</td>
+                          <td className="px-2 py-2 capitalize">{shift.verification_status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="big-value">Rs. 85,400</div>
-                <div className="text-xs text-text-muted mb-4 font-medium flex items-center gap-1">
-                  Total verified earnings across platforms
-                </div>
-                <div className="flex-1 min-h-[240px] mt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={EARNINGS_TREND}>
-                      <defs>
-                        <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                      <XAxis dataKey="name" hide />
-                      <YAxis hide domain={['dataMin - 500', 'dataMax + 500']} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#fff', 
-                          borderRadius: '12px', 
-                          border: '1px solid #E5E7EB',
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                        }}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="value" 
-                        stroke="#10b981" 
-                        strokeWidth={3}
-                        fillOpacity={1} 
-                        fill="url(#colorValue)" 
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+              )}
+            </section>
+          </section>
+        ) : user?.role === 'verifier' ? (
+          <section className="grid gap-6 lg:grid-cols-2">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-slate-900">Pending Worker Entries</h2>
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                  {verifierQueue.length} pending
+                </span>
               </div>
 
-              {/* Stat Card 1 */}
-              <div className="card-bento bg-white">
-                <div className="card-title-bento">Verification</div>
-                <div className="mt-2">
-                  <span className="badge-bento">94% Success</span>
-                </div>
-                <div className="big-value text-2xl mt-4">28 / 30</div>
-                <div className="text-xs text-text-muted font-medium">Shifts verified this month</div>
-              </div>
+              {Object.keys(pendingByWorker).length === 0 ? (
+                <p className="text-sm text-slate-600">No pending entries requiring verification right now.</p>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(pendingByWorker).map(([workerLabel, entries]) => (
+                    <div key={workerLabel} className="rounded-xl border border-slate-200 p-3">
+                      <h3 className="mb-2 text-sm font-semibold text-slate-800">{workerLabel}</h3>
+                      <div className="space-y-3">
+                        {entries.map((entry) => (
+                          <div key={entry.shift_id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="grid grid-cols-2 gap-2 text-xs text-slate-700 sm:grid-cols-3">
+                              <div>Date: {entry.shift_date}</div>
+                              <div>Platform: {entry.platform}</div>
+                              <div>Hours: {entry.hours_worked}</div>
+                              <div>Gross: PKR {Number(entry.gross_earned).toFixed(2)}</div>
+                              <div>Deduction: PKR {Number(entry.platform_deductions).toFixed(2)}</div>
+                              <div>Net: PKR {Number(entry.net_received).toFixed(2)}</div>
+                            </div>
 
-              {/* Anomaly Card */}
-              <div className={`card-bento ${anomaly?.anomalies?.length > 0 ? 'bg-red-50 border-red-100' : 'bg-white'}`}>
-                {anomaly?.anomalies?.length > 0 ? (
-                  <>
-                    <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="w-5 h-5 text-danger" />
-                      <div className="text-xs font-bold text-danger uppercase tracking-wider">Anomaly Flagged</div>
-                    </div>
-                    <div className="text-[13px] font-bold text-text-main mb-1">{anomaly.anomalies[0].type.replace('_', ' ')}</div>
-                    <p className="text-[11px] leading-relaxed text-text-main opacity-80">
-                      {anomaly.anomalies[0].explanation}. Our service suggests a dispute.
-                    </p>
-                    <div className="mt-auto">
-                      <button className="text-[10px] font-bold text-danger underline underline-offset-2">View Analysis</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2 mb-2">
-                      <CheckCircle2 className="w-5 h-5 text-brand" />
-                      <div className="text-xs font-bold text-brand uppercase tracking-wider">System Healthy</div>
-                    </div>
-                    <div className="text-[13px] font-bold text-text-main mb-1">No Anomalies</div>
-                    <p className="text-[11px] leading-relaxed text-text-muted">
-                      Your deduction rates are within platform norms for your zone.
-                    </p>
-                  </>
-                )}
-              </div>
+                            {entry.screenshot_url && (
+                              <a
+                                href={entry.screenshot_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-2 inline-block text-xs font-semibold text-emerald-700 underline"
+                              >
+                                View Screenshot
+                              </a>
+                            )}
 
-              {/* Stat Card 2 */}
-              <div className="card-bento bg-white">
-                <div className="card-title-bento">Hourly Rate</div>
-                <div className="big-value text-2xl">Rs. 274/hr</div>
-                <div className="flex items-center gap-1.5 mt-2">
-                  <span className="text-xs font-bold text-brand">Superior</span>
-                  <span className="text-[10px] text-text-muted">Avg: Rs. 260</span>
-                </div>
-              </div>
+                            <textarea
+                              className="mt-2 min-h-16 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs"
+                              placeholder="Add verifier note (optional)"
+                              value={decisionNotes[entry.shift_id] || ''}
+                              onChange={(e) =>
+                                setDecisionNotes((prev) => ({
+                                  ...prev,
+                                  [entry.shift_id]: e.target.value,
+                                }))
+                              }
+                            />
 
-              {/* Median Card */}
-              <div className="card-bento bg-white">
-                <div className="card-title-bento">City Comparison</div>
-                <div className="text-[11px] font-bold mb-3">{MOCK_USER.city_zone} Median</div>
-                <div className="w-full h-2 bg-gray-100 rounded-full relative overflow-visible">
-                  <div className="absolute top-0 left-0 h-full bg-brand rounded-full" 
-                       style={{ width: `${Math.min(100, (avgHourlyRate / (median * 1.5)) * 100)}%` }} />
-                  <div className="absolute top-[-4px] left-[66%] h-4 w-0.5 bg-black" />
-                </div>
-                <div className="flex justify-between mt-3">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] uppercase font-bold text-brand">Your Rate</span>
-                    <span className="text-xs font-black">{Math.round(avgHourlyRate)}</span>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    <span className="text-[8px] uppercase font-bold text-text-muted">Median</span>
-                    <span className="text-xs font-black">{median}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent Activity Card */}
-              <div className="card-bento md:col-span-2">
-                <div className="card-title-bento">Recent Verified Shifts</div>
-                <div className="space-y-1">
-                  {shifts.slice(0, 3).map((shift) => (
-                    <div key={shift.id} className="flex items-center justify-between py-2 border-b border-border-dim last:border-0 hover:bg-gray-50/50 px-2 rounded-lg transition-colors cursor-pointer group">
-                      <div className="flex items-center gap-3">
-                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
-                          shift.platform === 'Careem' ? 'bg-green-100 text-green-700' : 
-                          shift.platform === 'Bykea' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100'
-                        }`}>
-                          {shift.platform}
-                        </div>
-                        <div className="text-xs font-semibold text-text-main">{shift.shift_date}</div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-xs font-black">Rs. {shift.net_received}</div>
-                        <CheckCircle2 className="w-3.5 h-3.5 text-brand" />
-                        <ChevronRight className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                disabled={decisionLoadingId === entry.shift_id}
+                                onClick={() => handleVerifierDecision(entry.shift_id, 'verified')}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                disabled={decisionLoadingId === entry.shift_id}
+                                onClick={() => handleVerifierDecision(entry.shift_id, 'flagged')}
+                              >
+                                Flag
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                disabled={decisionLoadingId === entry.shift_id}
+                                onClick={() => handleVerifierDecision(entry.shift_id, 'unverifiable')}
+                              >
+                                Unverifiable
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
                 </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-slate-900">My Reviewed Entries</h2>
+                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                  {myReviewedShifts.length} total
+                </span>
               </div>
 
-              {/* Actions Card */}
-              <div className="card-bento md:col-span-2 flex-row items-center gap-6 overflow-hidden">
-                <div className="flex-1">
-                  <div className="card-title-bento">Quick Actions</div>
-                  <p className="text-[11px] text-text-muted mt-1">Manage your earnings documentation and support requests.</p>
-                </div>
-                <div className="flex gap-3">
-                  <button className="btn-bento btn-bento-outline flex gap-2">
-                    <FileText className="w-4 h-4" />
-                    Certificate
-                  </button>
-                  <button className="btn-bento btn-bento-primary flex gap-2">
-                    <Plus className="w-4 h-4" />
-                    New Shift
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'shifts' && (
-            <motion.div
-              key="shifts"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-6"
-            >
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-black">My Shifts</h2>
-                <button className="btn-bento btn-bento-primary flex gap-2">
-                  <Plus className="w-4 h-4" />
-                  Log Shift
-                </button>
-              </div>
-              <div className="card-bento p-0 overflow-hidden">
-                <table className="w-full text-left">
-                  <thead className="bg-gray-50 border-b border-border-dim">
-                    <tr>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Platform</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Date</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Hours</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Gross (Rs)</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Net (Rs)</th>
-                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border-dim">
-                    {shifts.map((shift) => (
-                      <tr key={shift.id} className="hover:bg-gray-50 transition-colors cursor-pointer group">
-                        <td className="px-6 py-4">
-                          <span className="text-xs font-bold text-text-main">{shift.platform}</span>
-                        </td>
-                        <td className="px-6 py-4 text-xs font-medium text-text-muted">{shift.shift_date}</td>
-                        <td className="px-6 py-4 text-xs font-medium">{shift.hours_worked}h</td>
-                        <td className="px-6 py-4 text-xs font-bold text-text-muted">Rs. {shift.gross_earned}</td>
-                        <td className="px-6 py-4 text-xs font-black">Rs. {shift.net_received}</td>
-                        <td className="px-6 py-4">
-                          <span className={`badge-bento ${
-                            shift.verification_status === 'verified' ? 'bg-brand/10 text-brand' : 
-                            shift.verification_status === 'pending' ? 'bg-yellow-50 text-warning' : 'bg-red-50 text-danger'
-                          }`}>
-                            {shift.verification_status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'grievances' && (
-            <motion.div
-              key="grievances"
-              className="flex items-center justify-center p-20"
-            >
-              <div className="text-center">
-                <AlertTriangle className="w-12 h-12 text-warning mx-auto mb-4" />
-                <h2 className="text-xl font-bold mb-2">Grievance Board</h2>
-                <p className="text-sm text-text-muted max-w-xs mx-auto">
-                  Report platform irregularities or deduction discrepancies. Our advocates review escalated cases.
-                </p>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'certificate' && (
-            <motion.div
-              key="certificate"
-              className="card-bento max-w-2xl mx-auto shadow-2xl p-0 border-double border-4 border-gray-100"
-            >
-              <div className="bg-emerald-800 text-white p-12 text-center relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <LayoutDashboard className="w-32 h-32" />
-                </div>
-                <div className="flex flex-col items-center">
-                  <CheckCircle2 className="w-16 h-16 mb-4 text-brand" />
-                  <h1 className="text-3xl font-black uppercase tracking-widest mb-2">FairGig Certified</h1>
-                  <p className="text-emerald-100 text-[10px] tracking-[0.2em] uppercase font-bold">Verified Income Statement</p>
-                </div>
-              </div>
-
-              <div className="p-12 space-y-8">
-                <div className="grid grid-cols-2 gap-8">
-                  <div>
-                    <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Worker Profile</label>
-                    <div className="text-lg font-black mt-1">{user?.name}</div>
-                    <div className="text-xs text-text-muted font-medium mt-0.5">ID: {user?.id}</div>
-                  </div>
-                  <div className="text-right">
-                    <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Region / Category</label>
-                    <div className="text-lg font-black mt-1">{user?.city_zone}</div>
-                    <div className="text-xs text-text-muted font-medium mt-0.5">{user?.category}</div>
-                  </div>
-                </div>
-
-                <div className="border-y border-border-dim py-6">
-                  <div className="grid grid-cols-3 gap-4 text-center">
-                    <div>
-                      <div className="text-[10px] font-bold text-text-muted uppercase mb-1">Total Net</div>
-                      <div className="text-xl font-black">Rs. {totalVerifiedNet.toLocaleString()}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-bold text-text-muted uppercase mb-1">Avg Hourly</div>
-                      <div className="text-xl font-black">Rs. {Math.round(avgHourlyRate)}/hr</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-bold text-text-muted uppercase mb-1">Status</div>
-                      <div className="text-xl font-black text-brand">VERIFIED</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-center">
-                  <p className="text-[10px] text-text-muted italic mb-6">
-                    This document certifies that the individual named above has successfully verified their platform earnings through FairGig protocols as of {new Date().toLocaleDateString()}.
-                  </p>
-                  <button 
-                    onClick={() => window.print()}
-                    className="btn-bento btn-bento-primary no-print"
-                  >
-                    Download Certificate (PDF)
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'analytics' && user?.role === 'advocate' && (
-            <motion.div
-              key="analytics"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="space-y-6"
-            >
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-black">Advocate Analytics Panel</h2>
-                <div className="text-xs font-bold text-text-muted uppercase tracking-widest bg-gray-100 px-3 py-1 rounded-full border border-border-dim">
-                  Live Market View
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Income Distribution */}
-                <div className="card-bento col-span-2">
-                  <div className="card-title-bento mb-6">Income Distribution by Zone</div>
-                  <div className="h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={distributionData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                        <XAxis dataKey="zone" tick={{ fontSize: 10, fontWeight: 700 }} interval={0} angle={-45} textAnchor="end" />
-                        <YAxis tick={{ fontSize: 10, fontWeight: 700 }} />
-                        <Tooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }} />
-                        <Bar dataKey="<20k" fill="#10b981" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="20k-40k" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="40k-60k" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="60k+" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Commission Trends */}
-                <div className="card-bento md:col-span-1">
-                  <div className="card-title-bento mb-4">Commission Trends (Last 6M)</div>
-                  <div className="h-[240px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={trendsData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                        <XAxis dataKey="month" hide />
-                        <YAxis tick={{ fontSize: 8 }} domain={[0, 0.4]} />
-                        <Tooltip />
-                        <Line type="monotone" dataKey="avg_rate" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <p className="text-[10px] text-text-muted mt-2 uppercase font-bold text-center">Average multi-platform commission rate</p>
-                </div>
-
-                {/* Top Complaints */}
-                <div className="card-bento md:col-span-1">
-                   <div className="card-title-bento mb-4">Top Grievance Categories</div>
-                   <div className="h-[240px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart layout="vertical" data={topComplaintsData} margin={{ left: 20 }}>
-                        <XAxis type="number" hide />
-                        <YAxis dataKey="category" type="category" tick={{ fontSize: 9, fontWeight: 700 }} width={80} />
-                        <Tooltip />
-                        <Bar dataKey="count" fill="#ef4444" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Vulnerability Table */}
-                <div className="card-bento col-span-2">
-                  <div className="card-title-bento mb-4 text-danger flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" />
-                    Critical Vulnerability Flags (MoM Income Drop &gt; 20%)
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-border-dim text-[10px] font-black uppercase text-text-muted">
-                          <th className="py-2">Worker Name</th>
-                          <th className="py-2">Zone</th>
-                          <th className="py-2 text-right">Prev Month</th>
-                          <th className="py-2 text-right">Current Month</th>
-                          <th className="py-2 text-center">Severity</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border-dim">
-                        {vulnerabilityData.map(v => (
-                          <tr key={v.id} className="text-xs">
-                            <td className="py-3 font-bold">{v.name}</td>
-                            <td className="py-3 text-text-muted">{v.city_zone}</td>
-                            <td className="py-3 text-right">Rs. {v.previous_month}</td>
-                            <td className="py-3 text-right text-danger font-black">Rs. {v.current_month}</td>
-                            <td className="py-3 text-center">
-                              <span className="badge-bento bg-red-100 text-red-600 border-red-200">High Risk</span>
-                            </td>
-                          </tr>
+              {Object.keys(myReviewedByWorker).length === 0 ? (
+                <p className="text-sm text-slate-600">No entries reviewed by you yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(myReviewedByWorker).map(([workerLabel, entries]) => (
+                    <div key={workerLabel} className="rounded-xl border border-slate-200 p-3">
+                      <h3 className="mb-2 text-sm font-semibold text-slate-800">{workerLabel}</h3>
+                      <ul className="space-y-2 text-xs text-slate-700">
+                        {entries.slice(0, 12).map((entry) => (
+                          <li key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span>
+                                {entry.shift_date} • {entry.platform} • Net PKR {Number(entry.net_received).toFixed(2)}
+                              </span>
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold capitalize">
+                                {entry.verification_status}
+                              </span>
+                            </div>
+                          </li>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </ul>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
+              )}
 
-      {/* Footer */}
-      <footer className="px-8 py-6 border-t border-border-dim text-center">
-        <p className="text-[10px] text-text-muted font-bold tracking-widest uppercase">
-          FairGig © 2026 • Built for SOFTEC Web Dev Competition
-        </p>
-      </footer>
-    </div>
+              {decisionError && <p className="mt-3 text-sm font-medium text-red-600">{decisionError}</p>}
+              {decisionSuccess && <p className="mt-3 text-sm font-medium text-emerald-700">{decisionSuccess}</p>}
+            </section>
+          </section>
+        ) : (
+          <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+            Earnings entry is available for worker accounts. You are logged in as {user?.role}.
+          </section>
+        )}
+      </div>
+    </main>
   );
 }
