@@ -5,16 +5,17 @@ import { usePathname, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import RoleSidebar from '@/components/role-sidebar';
 
-const publicRoutes = ['/', '/login', '/register'];
+const publicRoutes = ['/', '/login', '/register', '/unauthorized'];
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isPublic = publicRoutes.includes(pathname);
+  const usesDedicatedLayout = pathname.startsWith('/verifier');
   const [ready, setReady] = useState(isPublic);
 
   useEffect(() => {
-    if (isPublic) {
+    if (isPublic || usesDedicatedLayout) {
       setReady(true);
       return;
     }
@@ -57,7 +58,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     }
 
     setReady(true);
-  }, [isPublic, pathname, router]);
+  }, [isPublic, pathname, router, usesDedicatedLayout]);
 
   if (!isPublic && !ready) {
     return (
@@ -82,6 +83,27 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
         </motion.main>
       </AnimatePresence>
     );
+  }
+
+  if (usesDedicatedLayout) {
+    return (
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.main
+          key={pathname}
+          className="min-h-screen"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+        >
+          {children}
+        </motion.main>
+      </AnimatePresence>
+    );
+  }
+
+  if (!ready) {
+    return <main className="min-h-screen p-6 text-sm text-slate-500">Loading...</main>;
   }
 
   return (

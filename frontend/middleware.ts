@@ -20,12 +20,28 @@ function decodeRoleFromToken(token: string | undefined): string | null {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname === '/' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/_next')) {
+  if (
+    pathname === '/' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/register') ||
+    pathname.startsWith('/unauthorized') ||
+    pathname.startsWith('/_next')
+  ) {
     return NextResponse.next();
   }
 
   const token = request.cookies.get('fairgig_access_token')?.value;
   const role = decodeRoleFromToken(token);
+
+  if (pathname.startsWith('/verifier')) {
+    if (!role) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+    if (role !== 'verifier') {
+      return NextResponse.redirect(new URL('/unauthorized', request.url));
+    }
+    return NextResponse.next();
+  }
 
   if (!role) {
     return NextResponse.redirect(new URL('/login', request.url));

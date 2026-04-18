@@ -103,7 +103,7 @@ export default function WorkerDashboardPage() {
     setError('');
 
     try {
-      const shiftsRes = await fetch(`${API_BASE.earnings}/shifts?worker_id=${encodeURIComponent(workerId)}`, { cache: 'no-store' });
+      const shiftsRes = await authFetch(`${API_BASE.earnings}/shifts?worker_id=${encodeURIComponent(workerId)}`, { cache: 'no-store' });
       const shiftsPayload = await shiftsRes.json();
       const shiftRows: Shift[] = Array.isArray(shiftsPayload) ? shiftsPayload : [];
       setShifts(shiftRows);

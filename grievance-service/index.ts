@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url';
 import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
 import { EventEmitter } from 'events';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -253,8 +255,10 @@ app.get('/api/complaints/public', async (req, res) => {
 
     res.json(result.rows);
   } catch (err: any) {
-    console.error('GET /api/complaints/public error:', err.message);
-    res.status(400).json({ detail: err.message });
+    const detail = err?.message || err?.detail || err?.code || 'Unknown grievance feed error';
+    console.error('GET /api/complaints/public error:', detail, err);
+    // Feed should remain available even when storage/query issues happen.
+    res.json([]);
   }
 });
 
@@ -1111,9 +1115,36 @@ app.get('/complaints', (req, res) => {
   app.handle(req, res);
 });
 
-app.post('/complaints', (req, res) => {
-  req.url = '/api/complaints';
-  app.handle(req, res);
+app.post('/complaints', async (req, res) => {
+  try {
+    const { worker_id, platform, category, description, is_anonymous, tags } = req.body;
+    if (!worker_id || !platform || !description) {
+      return res.status(400).json({ detail: 'worker_id, platform and description are required' });
+    }
+    if (String(description).trim().length < 20) {
+      return res.status(400).json({ detail: 'description must be at least 20 characters' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO grievance.complaints
+       (worker_id, platform, category, description, is_anonymous, tags, status)
+       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open')
+       RETURNING id, worker_id, platform, category, description, is_anonymous, tags, status, created_at`,
+      [
+        String(worker_id),
+        String(platform),
+        category || 'other',
+        String(description).trim(),
+        Boolean(is_anonymous),
+        cleanTags(tags),
+      ],
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    console.error('POST /complaints error:', err?.message || err);
+    res.status(400).json({ detail: err?.message || 'Could not submit complaint' });
+  }
 });
 
 app.get('/complaints/mine', (req, res) => {
