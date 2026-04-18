@@ -23,14 +23,20 @@ async function startServer() {
   const services = [
     { name: 'Auth', path: './auth-service/index.ts', port: 8001 },
     { name: 'Earnings', path: './earnings-service/index.ts', port: 8002 },
-    { name: 'Anomaly', path: './anomaly-service/index.ts', port: 8003 },
+    { name: 'Anomaly', path: './anomaly-service/main.py', port: 8003, isPython: true },
     { name: 'Grievance', path: './grievance-service/index.ts', port: 8004 },
     { name: 'Analytics', path: './analytics-service/index.ts', port: 8005 },
   ];
 
   services.forEach(s => {
     console.log(`Starting ${s.name} Service...`);
-    fork(s.path, { execArgv: ['--import', 'tsx/esm'] });
+    if (s.isPython) {
+      // Start Python microservice
+      const { spawn } = require('child_process');
+      spawn('python', [s.path], { stdio: 'inherit' });
+    } else {
+      fork(s.path, { execArgv: ['--import', 'tsx/esm'] });
+    }
   });
 
   const app = express();
