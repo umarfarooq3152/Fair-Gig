@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm --prefix frontend run dev",
+    "dev": "tsx dev-services.ts",
+    "dev:services": "tsx dev-services.ts",
+    "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "preview": "npm --prefix frontend run start",
     "clean": "rm -rf dist",

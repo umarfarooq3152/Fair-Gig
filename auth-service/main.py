@@ -1,10 +1,13 @@
 import os
+import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import psycopg2
+import bcrypt
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -28,6 +31,30 @@ JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey_changeme")
 ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
+
+
+@app.exception_handler(Exception)
+def unhandled_exception_handler(request, exc):
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+def hash_password(plain_password: str) -> str:
+    try:
+        return pwd_context.hash(plain_password)
+    except Exception:
+        # Fallback for environments where passlib backend detection fails.
+        return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    try:
+        return pwd_context.verify(plain_password, password_hash)
+    except Exception:
+        try:
+            return bcrypt.checkpw(plain_password.encode("utf-8"), password_hash.encode("utf-8"))
+        except Exception:
+            return False
 
 
 class RegisterRequest(BaseModel):
@@ -110,7 +137,7 @@ def register(payload: RegisterRequest):
     if payload.role not in {"worker", "verifier", "advocate"}:
         raise HTTPException(status_code=400, detail="Invalid role")
 
-    password_hash = pwd_context.hash(payload.password)
+    password_hash = hash_password(payload.password)
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -152,7 +179,7 @@ def login(payload: LoginRequest):
             )
             user = cur.fetchone()
 
-    if not user or not pwd_context.verify(payload.password, user["password_hash"]):
+    if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     access_token = create_token(str(user["id"]), user["role"])

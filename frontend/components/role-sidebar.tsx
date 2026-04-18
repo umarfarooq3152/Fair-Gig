@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 const roleRoutes: Record<string, Array<{ href: string; label: string }>> = {
   worker: [
@@ -20,7 +21,13 @@ const roleRoutes: Record<string, Array<{ href: string; label: string }>> = {
 
 export default function RoleSidebar() {
   const pathname = usePathname();
-  const role = typeof window !== 'undefined' ? localStorage.getItem('fairgig_role') || 'worker' : 'worker';
+  const [role, setRole] = useState('worker');
+
+  useEffect(() => {
+    const savedRole = localStorage.getItem('fairgig_role') || 'worker';
+    setRole(savedRole);
+  }, []);
+
   const links = roleRoutes[role] || roleRoutes.worker;
 
   return (
