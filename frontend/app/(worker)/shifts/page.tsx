@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, authFetch } from '@/lib/api';
 
 type Shift = {
   id: string;
@@ -259,7 +259,7 @@ export default function ShiftsPage() {
     }
 
     try {
-      const res = await fetch(`${API_BASE.earnings}/shifts?worker_id=${encodeURIComponent(workerId)}`, { cache: 'no-store' });
+      const res = await authFetch(`${API_BASE.earnings}/shifts?worker_id=${encodeURIComponent(workerId)}`, { cache: 'no-store' });
       const payload = await res.json();
       if (!res.ok) {
         setError(payload?.detail || 'Could not load shifts');
@@ -307,7 +307,7 @@ export default function ShiftsPage() {
     const method = editingId ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -323,7 +323,7 @@ export default function ShiftsPage() {
       if (proofFile && shiftId) {
         const formData = new FormData();
         formData.append('file', proofFile);
-        const screenshotRes = await fetch(`${API_BASE.earnings}/shifts/${shiftId}/screenshot`, {
+        const screenshotRes = await authFetch(`${API_BASE.earnings}/shifts/${shiftId}/screenshot`, {
           method: 'POST',
           body: formData,
         });
@@ -355,7 +355,7 @@ export default function ShiftsPage() {
     setDeletingId(id);
     setError('');
     try {
-      const res = await fetch(`${API_BASE.earnings}/shifts/${id}`, {
+      const res = await authFetch(`${API_BASE.earnings}/shifts/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ worker_id: workerId }),
@@ -478,7 +478,7 @@ export default function ShiftsPage() {
 
     for (const row of selected) {
       try {
-        const createRes = await fetch(`${API_BASE.earnings}/shifts`, {
+        const createRes = await authFetch(`${API_BASE.earnings}/shifts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -501,7 +501,7 @@ export default function ShiftsPage() {
 
         const formData = new FormData();
         formData.append('file', row.screenshotFile as File);
-        const screenshotRes = await fetch(`${API_BASE.earnings}/shifts/${created.id}/screenshot`, {
+        const screenshotRes = await authFetch(`${API_BASE.earnings}/shifts/${created.id}/screenshot`, {
           method: 'POST',
           body: formData,
         });
