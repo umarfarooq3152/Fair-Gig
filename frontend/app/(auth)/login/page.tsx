@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_BASE } from '@/lib/api';
 import Link from 'next/link';
@@ -10,10 +10,19 @@ export default function LoginPage() {
   const [email, setEmail] = useState('worker1@fairgig.demo');
   const [password, setPassword] = useState('password');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    router.prefetch('/dashboard');
+    router.prefetch('/queue');
+    router.prefetch('/advocate/analytics');
+  }, [router]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError('');
+    setIsSubmitting(true);
 
     try {
       const response = await fetch(`${API_BASE.auth}/auth/login`, {
@@ -24,6 +33,7 @@ export default function LoginPage() {
 
       if (!response.ok) {
         setError('Invalid credentials');
+        setIsSubmitting(false);
         return;
       }
 
@@ -50,6 +60,7 @@ export default function LoginPage() {
     } catch (err) {
       console.error(err);
       setError('Network error: Unable to connect to the authentication service.');
+      setIsSubmitting(false);
     }
   };
 
@@ -68,7 +79,20 @@ export default function LoginPage() {
             <input className="h-12 w-full rounded-none border-2 border-slate-200 px-3 font-bold focus:border-slate-900 focus:outline-none" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
           </div>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <button className="h-14 w-full bg-slate-900 text-[11px] font-black uppercase tracking-widest text-white hover:bg-slate-800" type="submit">Sign In</button>
+          <button
+            className="flex h-14 w-full items-center justify-center gap-2 bg-slate-900 text-[11px] font-black uppercase tracking-widest text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+            type="submit"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Signing In...
+              </>
+            ) : (
+              'Sign In'
+            )}
+          </button>
         </form>
         <div className="mt-8 border-t-2 border-slate-100 pt-6 text-center text-sm text-slate-500">
           Don&apos;t have an account? <Link href="/register" className="font-bold text-slate-900">Register</Link>

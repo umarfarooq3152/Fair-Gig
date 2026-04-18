@@ -1,10 +1,14 @@
 ﻿'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import type { EChartsOption } from 'echarts';
-import ReactECharts from 'echarts-for-react';
 import { API_BASE, authFetch } from '@/lib/api';
-import { format, formatDistanceToNow } from 'date-fns';
+
+const ReactECharts = dynamic(() => import('echarts-for-react'), {
+  ssr: false,
+  loading: () => <div className="h-full w-full animate-pulse rounded-lg bg-slate-100" />,
+});
 
 type Shift = {
   id: string;
@@ -40,9 +44,40 @@ function asDate(dateLike: string) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function formatShortDate(d: Date) {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit' }).format(d);
+}
+
+function formatDateLong(dateLike: string) {
+  const d = asDate(dateLike);
+  if (!d) return dateLike;
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).format(d);
+}
+
+function formatRelativeTime(dateLike: string) {
+  const d = asDate(dateLike);
+  if (!d) return dateLike;
+
+  const now = Date.now();
+  const diffMs = d.getTime() - now;
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+  const absSec = Math.abs(Math.round(diffMs / 1000));
+  if (absSec < 60) return rtf.format(Math.round(diffMs / 1000), 'second');
+
+  const absMin = Math.abs(Math.round(diffMs / 60000));
+  if (absMin < 60) return rtf.format(Math.round(diffMs / 60000), 'minute');
+
+  const absHr = Math.abs(Math.round(diffMs / 3600000));
+  if (absHr < 24) return rtf.format(Math.round(diffMs / 3600000), 'hour');
+
+  const absDay = Math.abs(Math.round(diffMs / 86400000));
+  return rtf.format(Math.round(diffMs / 86400000), 'day');
+}
+
 export default function WorkerDashboardPage() {
   const [isMounted, setIsMounted] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
@@ -83,14 +118,13 @@ export default function WorkerDashboardPage() {
         }))
         .filter((row) => Boolean(asDate(row.shift_date)));
 
-      const [anomalyRes, complaintsRes, medianResV1, medianResV2] = await Promise.all([
+      const [anomalyRes, complaintsRes, medianRes] = await Promise.all([
         fetch(`${API_BASE.anomaly}/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ worker_id: workerId, earnings: earningsForAnomaly }),
         }),
         authFetch(`${API_BASE.grievance}/api/complaints/mine`, { cache: 'no-store' }),
-        fetch(`${API_BASE.analytics}/median/${encodeURIComponent(category)}/${encodeURIComponent(zone)}`, { cache: 'no-store' }),
         fetch(`${API_BASE.analytics}/analytics/median/${encodeURIComponent(category)}/${encodeURIComponent(zone)}`, { cache: 'no-store' }),
       ]);
 
@@ -107,9 +141,8 @@ export default function WorkerDashboardPage() {
       }
 
       let medianValue = 0;
-      const medianResponse = medianResV1.ok ? medianResV1 : medianResV2;
-      if (medianResponse.ok) {
-        const medianPayload = await medianResponse.json();
+      if (medianRes.ok) {
+        const medianPayload = await medianRes.json();
         medianValue = Number(medianPayload.median_hourly || 0);
       }
       setMedianHourly(medianValue);
@@ -149,14 +182,14 @@ export default function WorkerDashboardPage() {
     for (const s of sortedShifts) {
       const dOptions = asDate(s.shift_date);
       if (!dOptions) continue;
-      const dStr = format(dOptions, 'MMM dd');
+      const dStr = formatShortDate(dOptions);
       daily.set(dStr, (daily.get(dStr) || 0) + Number(s.net_received || 0));
     }
 
     for (const a of anomalies) {
       const ad = asDate(a.affected_date);
       if (!ad) continue;
-      const dStr = format(ad, 'MMM dd');
+      const dStr = formatShortDate(ad);
       const list = anomalyMap.get(dStr) || [];
       list.push(a);
       anomalyMap.set(dStr, list);
@@ -241,7 +274,11 @@ export default function WorkerDashboardPage() {
     };
   }, [sortedShifts, anomalies]);
 
-  if (!isMounted || (loading && !shifts.length)) {
+  if (!isMounted) {
+    return <div className="p-8 text-center text-slate-500 font-medium animate-pulse">Loading dashboard...</div>;
+  }
+
+  if (loading && !shifts.length) {
     return <div className="p-8 text-center text-slate-500 font-medium animate-pulse">Loading amazing things...</div>;
   }
 
@@ -341,7 +378,7 @@ export default function WorkerDashboardPage() {
                         {c.platform}
                       </td>
                       <td className="py-3 px-4 text-slate-500 hidden lg:table-cell">
-                        {asDate(c.created_at) ? format(asDate(c.created_at)!, 'MMM dd, yyyy') : c.created_at}
+                        {formatDateLong(c.created_at)}
                       </td>
                       <td className="py-3 px-4">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-semibold 
@@ -403,7 +440,7 @@ export default function WorkerDashboardPage() {
                     <p className="text-sm font-bold text-emerald-600">+PKR {s.net_received}</p>
                   </div>
                   <div className="flex justify-between mt-0.5">
-                    <p className="text-xs text-slate-500">{asDate(s.shift_date) ? formatDistanceToNow(asDate(s.shift_date)!, { addSuffix: true }) : s.shift_date}</p>
+                    <p className="text-xs text-slate-500">{formatRelativeTime(s.shift_date)}</p>
                     <p className="text-xs text-slate-400 font-medium">{s.hours_worked} hrs</p>
                   </div>
                 </div>
