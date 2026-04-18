@@ -9,3 +9,29 @@ coverage/
 earnings-service/uploads/
 .env*
 !.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+anomaly-service/venv/
+anomaly-service/__pycache__/
+venv/
+ENV/
+env/
+.venv/
+
+# VSCode
+.vscode/
+
+# OS
+Thumbs.db
+
+# Python logs
+*.log
+
+# Misc
+*.swp
+*.swo
+.idea/
