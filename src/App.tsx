@@ -25,13 +25,24 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types ---
+type UserRole = 'worker' | 'verifier' | 'advocate';
 // (Type definitions follow...)
   id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  city_zone?: string | null;
-  category?: string | null;
+  worker_id?: string;
+  worker_name?: string;
+  verifier_id?: string | null;
+  verifier_note?: string | null;
+  screenshot_url?: string | null;
+  deduction_rate?: number;
+  created_at?: string;
+  platform: string;
+  shift_date: string;
+  hours_worked: number;
+  gross_earned: number;
+  platform_deductions: number;
+  net_received: number;
+  notes?: string | null;
+  verification_status: string;
 };
 
 type Shift = {
