@@ -134,6 +134,85 @@ async function uploadScreenshotToSupabase(
   };
 }
 
+function normalizeKey(key: string) {
+  return String(key || '').replace(/^\uFEFF/, '').trim().toLowerCase();
+}
+
+function pickRowValue(row: Record<string, string>, keys: string[]) {
+  const normalized = new Map<string, string>();
+  for (const [k, v] of Object.entries(row || {})) {
+    normalized.set(normalizeKey(k), typeof v === 'string' ? v.trim() : String(v ?? '').trim());
+  }
+
+  for (const key of keys) {
+    const value = normalized.get(normalizeKey(key));
+    if (value !== undefined && value !== '') return value;
+  }
+  return '';
+}
+
+function normalizePlatform(input: string) {
+  const raw = String(input || '').trim();
+  const key = raw.toLowerCase();
+
+  const mapping: Record<string, string> = {
+    careem: 'Careem',
+    bykea: 'Bykea',
+    foodpanda: 'foodpanda',
+    upwork: 'Upwork',
+    other: 'Other',
+  };
+
+  return mapping[key] || raw;
+}
+
+function parseCsvDate(input: string) {
+  const value = String(input || '').trim();
+  if (!value) return '';
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+  const compact = value.replace(/\./g, '/').replace(/-/g, '/');
+  const parts = compact.split('/').map((p) => p.trim());
+  if (parts.length !== 3) return '';
+
+  // YYYY/MM/DD
+  if (/^\d{4}$/.test(parts[0])) {
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    const d = Number(parts[2]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // DD/MM/YYYY or MM/DD/YYYY (best effort)
+  if (/^\d{4}$/.test(parts[2])) {
+    const a = Number(parts[0]);
+    const b = Number(parts[1]);
+    const y = Number(parts[2]);
+
+    let d = a;
+    let m = b;
+    if (b > 12 && a <= 12) {
+      m = a;
+      d = b;
+    }
+
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  return '';
+}
+
+function parseCsvNumber(input: string) {
+  const value = String(input || '').replace(/,/g, '').trim();
+  if (!value) return NaN;
+  return Number(value);
+}
+
 // ---------------------------------------------------------------------------
 // GET /shifts — list shifts (soft-delete aware)
 // ---------------------------------------------------------------------------
@@ -160,9 +239,20 @@ app.get('/shifts', async (req, res) => {
   }
 
   const query = `
-    SELECT s.*, u.name AS worker_name
+    SELECT
+      s.*, 
+      u.name AS worker_name,
+      ss.file_url AS screenshot_url
     FROM earnings.shifts s
     JOIN auth.users u ON u.id = s.worker_id
+    LEFT JOIN LATERAL (
+      SELECT sc.file_url
+      FROM earnings.shift_screenshots sc
+      WHERE sc.shift_id = s.id
+        AND sc.is_primary = TRUE
+      ORDER BY sc.created_at DESC
+      LIMIT 1
+    ) ss ON TRUE
     WHERE ${where.join(' AND ')}
     ORDER BY s.shift_date DESC, s.created_at DESC
   `;
@@ -305,7 +395,34 @@ app.post('/shifts/import-csv', uploadCsv.single('file'), async (req, res) => {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     try {
-      await ensureDailyHoursWithinLimit(workerId, String(row.shift_date), Number(row.hours_worked));
+      const platform = normalizePlatform(pickRowValue(row, ['platform']));
+      const shiftDate = parseCsvDate(pickRowValue(row, ['shift_date', 'date', 'shift date']));
+      const hoursWorked = parseCsvNumber(pickRowValue(row, ['hours_worked', 'hours', 'hours worked']));
+      const grossEarned = parseCsvNumber(pickRowValue(row, ['gross_earned', 'gross', 'gross earned']));
+      const platformDeductions = parseCsvNumber(pickRowValue(row, ['platform_deductions', 'deductions', 'platform deductions']));
+      const rawNet = pickRowValue(row, ['net_received', 'net', 'net received']);
+      const netReceived = rawNet ? parseCsvNumber(rawNet) : Number((grossEarned - platformDeductions).toFixed(2));
+
+      if (!platform) {
+        throw new Error('platform is required');
+      }
+      if (!shiftDate) {
+        throw new Error('shift_date is required and must be a valid date');
+      }
+      if (!Number.isFinite(hoursWorked) || hoursWorked <= 0 || hoursWorked > 24) {
+        throw new Error('hours_worked must be a number between 0 and 24');
+      }
+      if (!Number.isFinite(grossEarned) || grossEarned < 0) {
+        throw new Error('gross_earned must be a non-negative number');
+      }
+      if (!Number.isFinite(platformDeductions) || platformDeductions < 0) {
+        throw new Error('platform_deductions must be a non-negative number');
+      }
+      if (!Number.isFinite(netReceived) || netReceived < 0) {
+        throw new Error('net_received must be a non-negative number');
+      }
+
+      await ensureDailyHoursWithinLimit(workerId, shiftDate, hoursWorked);
 
       await pool.query(
         `INSERT INTO earnings.shifts
@@ -315,12 +432,12 @@ app.post('/shifts/import-csv', uploadCsv.single('file'), async (req, res) => {
          VALUES ($1, $2::earnings.platform_name, $3, $4, $5, $6, $7, TRUE, $8, 'pending')`,
         [
           workerId,
-          row.platform,
-          row.shift_date,
-          Number(row.hours_worked),
-          Number(row.gross_earned),
-          Number(row.platform_deductions),
-          Number(row.net_received),
+          platform,
+          shiftDate,
+          hoursWorked,
+          grossEarned,
+          platformDeductions,
+          netReceived,
           importId,
         ],
       );
@@ -348,6 +465,7 @@ app.post('/shifts/import-csv', uploadCsv.single('file'), async (req, res) => {
     inserted_count: inserted,
     failed_count: failed,
     status,
+    errors,
   });
 });
 
