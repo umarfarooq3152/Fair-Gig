@@ -123,6 +123,17 @@ function normalizeStatus(status?: string) {
   return 'pending';
 }
 
+function isSameDay(dateLike: string | undefined, target: Date) {
+  if (!dateLike) return false;
+  const date = new Date(dateLike);
+  if (Number.isNaN(date.getTime())) return false;
+  return (
+    date.getFullYear() === target.getFullYear() &&
+    date.getMonth() === target.getMonth() &&
+    date.getDate() === target.getDate()
+  );
+}
+
 function statusClass(status?: string) {
   const normalized = normalizeStatus(status);
   if (normalized === 'verified') return 'bg-emerald-100 text-emerald-700 border-emerald-300';
@@ -225,37 +236,34 @@ export default function VerifierDashboardPage() {
       setLoading(true);
       setError('');
 
-      const verifierId = localStorage.getItem('fairgig_user_id') || '';
-      const [statsPayload, queuePayload, profilePayload, shiftsPayload, mePayload] = await Promise.all([
+      const [statsPayload, queuePayload, profilePayload, mePayload] = await Promise.all([
         fetchJsonOrNull('/stats'),
         fetchJsonOrNull('/queue'),
         fetchJsonOrNull('/profile'),
-        authFetch(`${API_BASE.earnings}/shifts`, { cache: 'no-store' }).then(async (res) => (res.ok ? await res.json() : null)),
-        authFetch(`${API_BASE.auth}/me`, { cache: 'no-store' }).then(async (res) => (res.ok ? await res.json() : null)),
+        authFetch(`${API_BASE.auth}/auth/me`, { cache: 'no-store' }).then(async (res) => (res.ok ? await res.json() : null)),
       ]);
 
-      const allShifts = Array.isArray(shiftsPayload) ? (shiftsPayload as ShiftRow[]) : [];
-      const verifierShifts = allShifts.filter((row) => String(row.verifier_id || '') === verifierId);
-      const derived = deriveFromShifts(verifierShifts);
+      const todayVerified = numberValue((statsPayload as any)?.total_verified);
+      const todayFlagged = numberValue((statsPayload as any)?.flagged_discrepancies);
+      const todayUnverifiable = numberValue((statsPayload as any)?.marked_unverifiable);
+      const todayAccuracy = numberValue((statsPayload as any)?.accuracy_rate);
 
-      if (statsPayload && typeof statsPayload === 'object') {
-        setStats({
-          total_verified: numberValue((statsPayload as any).total_verified),
-          flagged_discrepancies: numberValue((statsPayload as any).flagged_discrepancies),
-          marked_unverifiable: numberValue((statsPayload as any).marked_unverifiable),
-          accuracy_rate: numberValue((statsPayload as any).accuracy_rate),
-          weekly_activity: Array.isArray((statsPayload as any).weekly_activity)
-            ? (statsPayload as any).weekly_activity.map((r: any) => ({
-                day: shortDay(String(r?.day || r?.date || '')),
-                verified: numberValue(r?.verified),
-                flagged: numberValue(r?.flagged),
-                unverifiable: numberValue(r?.unverifiable),
-              }))
-            : derived.stats.weekly_activity,
-        });
-      } else {
-        setStats(derived.stats);
-      }
+      const weeklyActivity = statsPayload && typeof statsPayload === 'object' && Array.isArray((statsPayload as any).weekly_activity)
+        ? (statsPayload as any).weekly_activity.map((r: any) => ({
+            day: shortDay(String(r?.day || r?.date || '')),
+            verified: numberValue(r?.verified),
+            flagged: numberValue(r?.flagged),
+            unverifiable: numberValue(r?.unverifiable),
+          }))
+        : [];
+
+      setStats({
+        total_verified: todayVerified,
+        flagged_discrepancies: todayFlagged,
+        marked_unverifiable: todayUnverifiable,
+        accuracy_rate: todayAccuracy,
+        weekly_activity: weeklyActivity,
+      });
 
       const queueRows: QueueItem[] = Array.isArray(queuePayload)
         ? (queuePayload as any[]).map((row) => ({
@@ -271,23 +279,15 @@ export default function VerifierDashboardPage() {
           }))
         : [];
 
-      const fallbackRecent: QueueItem[] = derived.reviewed
-        .slice()
-        .sort((a, b) => new Date(b.verified_at || b.updated_at || '').getTime() - new Date(a.verified_at || a.updated_at || '').getTime())
-        .slice(0, 5)
-        .map((row) => ({
-          id: row.id,
-          worker_name: row.worker_name || 'Unknown worker',
-          platform: row.platform || '—',
-          net_received: numberValue(row.net_received),
-          shift_date: row.shift_date || row.created_at || '',
-          status: row.verification_status || 'pending',
-          reviewed_at: row.verified_at || row.updated_at || '',
-          submitted_at: row.created_at || '',
-          created_at: row.created_at || '',
-        }));
+      const combinedPending = [...queueRows]
+        .sort((a, b) => {
+          const aTime = new Date(a.submitted_at || a.created_at || a.shift_date || '').getTime() || 0;
+          const bTime = new Date(b.submitted_at || b.created_at || b.shift_date || '').getTime() || 0;
+          return aTime - bTime;
+        })
+        .slice(0, 5);
 
-      setRecent((queueRows.length ? queueRows : fallbackRecent).slice(0, 5));
+      setRecent(combinedPending.slice(0, 8));
 
       const me = (profilePayload && typeof profilePayload === 'object' ? profilePayload : mePayload) as any;
       if (me && typeof me === 'object') {
@@ -295,14 +295,14 @@ export default function VerifierDashboardPage() {
           name: String(me?.name || me?.full_name || 'Verifier'),
           email: typeof me?.email === 'string' ? me.email : '',
           created_at: String(me?.created_at || me?.member_since || ''),
-          verifications_today: numberValue(me?.verifications_today),
+          verifications_today: numberValue(me?.verifications_today || todayVerified),
         });
       } else {
         setProfile({
           name: localStorage.getItem('fairgig_user_name') || 'Verifier',
           email: '',
           created_at: '',
-          verifications_today: 0,
+          verifications_today: todayVerified,
         });
       }
     } catch {
@@ -349,7 +349,7 @@ export default function VerifierDashboardPage() {
         <div className="flex justify-between items-center bg-white rounded-xl p-4 shadow-sm border border-slate-100">
           <div>
             <h1 className="text-xl font-bold text-slate-800">Dashboard Overview</h1>
-            <p className="text-sm text-slate-500">Welcome back! Here is your latest verification performance.</p>
+            <p className="text-sm text-slate-500">Today&apos;s verification actions by your account.</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => void load()} className="px-4 py-2 bg-indigo-50 text-indigo-600 font-medium rounded-lg text-sm hover:bg-indigo-100 transition">
