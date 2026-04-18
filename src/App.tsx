@@ -103,7 +103,6 @@ export default function App() {
           {user.role === 'worker' && activeSection === 'dashboard' && (
             <WorkerDashboard
               workerId={userId}
-              token={token}
               cityZone={user.city_zone || null}
               category={user.category || null}
             />

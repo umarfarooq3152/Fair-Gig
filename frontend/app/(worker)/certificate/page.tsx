@@ -16,11 +16,25 @@ export default function CertificatePage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [from, setFrom] = useState(new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString().slice(0, 10));
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [profile, setProfile] = useState({
+    name: 'Worker',
+    id: '',
+    category: '',
+    zone: '',
+  });
 
   useEffect(() => {
     const run = async () => {
       const workerId = localStorage.getItem('fairgig_user_id');
       if (!workerId) return;
+
+      setProfile({
+        name: localStorage.getItem('fairgig_user_name') || 'Worker',
+        id: localStorage.getItem('fairgig_user_id') || '',
+        category: localStorage.getItem('fairgig_category') || '',
+        zone: localStorage.getItem('fairgig_city_zone') || '',
+      });
+
       const res = await fetch(`${API_BASE.earnings}/shifts?worker_id=${workerId}&from=${from}&to=${to}`);
       const data = await res.json();
       setShifts(data.filter((s: Shift) => s.verification_status === 'verified'));
@@ -73,10 +87,10 @@ export default function CertificatePage() {
         </div>
 
         <div className="mb-6 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
-          <p>Worker: {localStorage.getItem('fairgig_user_name') || 'Worker'}</p>
-          <p>ID: {localStorage.getItem('fairgig_user_id') || ''}</p>
-          <p>Category: {localStorage.getItem('fairgig_category') || ''}</p>
-          <p>Zone: {localStorage.getItem('fairgig_city_zone') || ''}</p>
+          <p>Worker: {profile.name}</p>
+          <p>ID: {profile.id}</p>
+          <p>Category: {profile.category}</p>
+          <p>Zone: {profile.zone}</p>
           <p className="md:col-span-2">Period: {from} to {to}</p>
         </div>
 
