@@ -1,0 +1,6 @@
+{
+  "name": "FairGig",
+  "description": "An end-to-end platform for gig workers to log shifts, track earnings, detect anomalies, and file grievances, with verifier and advocate roles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

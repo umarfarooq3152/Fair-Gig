@@ -1,0 +1,46 @@
+{
+  "info": {
+    "name": "FairGig API Collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "SOFTEC 2026 FairGig service endpoints"
+  },
+  "item": [
+    {
+      "name": "Auth Register",
+      "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "url": "http://localhost:8001/auth/register", "body": {"mode": "raw", "raw": "{\n  \"name\": \"Worker Demo\",\n  \"email\": \"worker.demo@fairgig.local\",\n  \"password\": \"password\",\n  \"role\": \"worker\",\n  \"city_zone\": \"DHA\",\n  \"category\": \"ride_hailing\"\n}"}}
+    },
+    {
+      "name": "Auth Login",
+      "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "url": "http://localhost:8001/auth/login", "body": {"mode": "raw", "raw": "{\n  \"email\": \"worker1@fairgig.demo\",\n  \"password\": \"password\"\n}"}}
+    },
+    {
+      "name": "Auth Me",
+      "request": {"method": "GET", "header": [{"key": "Authorization", "value": "Bearer {{access_token}}"}], "url": "http://localhost:8001/auth/me"}
+    },
+    {
+      "name": "Create Shift",
+      "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "url": "http://localhost:8002/shifts", "body": {"mode": "raw", "raw": "{\n  \"worker_id\": \"{{worker_id}}\",\n  \"platform\": \"Careem\",\n  \"shift_date\": \"2026-04-01\",\n  \"hours_worked\": 8,\n  \"gross_earned\": 3200,\n  \"platform_deductions\": 900,\n  \"net_received\": 2300\n}"}}
+    },
+    {"name": "List Shifts", "request": {"method": "GET", "url": "http://localhost:8002/shifts?worker_id={{worker_id}}"}},
+    {"name": "Verifier Queue", "request": {"method": "GET", "url": "http://localhost:8002/verifier/queue"}},
+    {"name": "Verifier Decision", "request": {"method": "PUT", "header": [{"key": "Content-Type", "value": "application/json"}], "url": "http://localhost:8002/verifier/{{shift_id}}/decision", "body": {"mode": "raw", "raw": "{\n  \"status\": \"verified\",\n  \"verifier_id\": \"{{verifier_id}}\"\n}"}}},
+    {
+      "name": "Analyze Earnings",
+      "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "url": "http://localhost:8003/analyze", "body": {"mode": "raw", "raw": "{\n  \"worker_id\": \"{{worker_id}}\",\n  \"earnings\": [{\n    \"shift_date\": \"2025-01-15\",\n    \"platform\": \"Careem\",\n    \"gross_earned\": 2000,\n    \"platform_deductions\": 700,\n    \"net_received\": 1300,\n    \"hours_worked\": 4\n  }]\n}"}}
+    },
+    {"name": "Create Complaint", "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "url": "http://localhost:8004/complaints", "body": {"mode": "raw", "raw": "{\n  \"worker_id\": \"{{worker_id}}\",\n  \"platform\": \"Careem\",\n  \"category\": \"commission_hike\",\n  \"description\": \"Deductions jumped this week\"\n}"}}},
+    {"name": "List Complaints", "request": {"method": "GET", "url": "http://localhost:8004/complaints"}},
+    {"name": "Complaint Clusters", "request": {"method": "GET", "url": "http://localhost:8004/complaints/clusters"}},
+    {"name": "Commission Trends", "request": {"method": "GET", "url": "http://localhost:8005/analytics/commission-trends"}},
+    {"name": "Income Distribution", "request": {"method": "GET", "url": "http://localhost:8005/analytics/income-distribution"}},
+    {"name": "Vulnerability Flags", "request": {"method": "GET", "url": "http://localhost:8005/analytics/vulnerability-flags"}},
+    {"name": "Median Hourly", "request": {"method": "GET", "url": "http://localhost:8005/analytics/median/ride_hailing/DHA"}},
+    {"name": "Top Complaints", "request": {"method": "GET", "url": "http://localhost:8005/analytics/top-complaints"}}
+  ],
+  "variable": [
+    {"key": "access_token", "value": ""},
+    {"key": "worker_id", "value": ""},
+    {"key": "shift_id", "value": ""},
+    {"key": "verifier_id", "value": ""}
+  ]
+}

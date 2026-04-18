@@ -1,0 +1,11 @@
+node_modules/
+frontend/node_modules/
+frontend/.next/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+earnings-service/uploads/
+.env*
+!.env.example
