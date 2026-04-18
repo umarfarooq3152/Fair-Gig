@@ -16,8 +16,8 @@ type DemoRole = keyof typeof ROLE_DEMOS;
 export default function LoginPage() {
   const router = useRouter();
   const [rolePreset, setRolePreset] = useState<DemoRole>('worker');
-  const [email, setEmail] = useState(ROLE_DEMOS.worker.email);
-  const [password, setPassword] = useState(ROLE_DEMOS.worker.password);
+  const [email, setEmail] = useState<string>(ROLE_DEMOS.worker.email);
+  const [password, setPassword] = useState<string>(ROLE_DEMOS.worker.password);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -26,6 +26,13 @@ export default function LoginPage() {
     router.prefetch('/queue');
     router.prefetch('/advocate/analytics');
   }, [router]);
+
+  const applyRolePreset = (role: DemoRole) => {
+    setRolePreset(role);
+    setEmail(ROLE_DEMOS[role].email);
+    setPassword(ROLE_DEMOS[role].password);
+    setError('');
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -67,10 +74,16 @@ export default function LoginPage() {
         });
         if (!me.ok) {
           setError('Could not load profile');
-          setLoading(false);
+          setIsSubmitting(false);
           return;
         }
         user = await me.json();
+      }
+
+      if (!user) {
+        setError('Could not load profile');
+        setIsSubmitting(false);
+        return;
       }
 
       localStorage.setItem('fairgig_role', user.role);

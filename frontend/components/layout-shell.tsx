@@ -1,6 +1,7 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import RoleSidebar from '@/components/role-sidebar';
 
@@ -71,6 +72,10 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
         </motion.main>
       </AnimatePresence>
     );
+  }
+
+  if (!ready) {
+    return <main className="min-h-screen p-6 text-sm text-slate-500">Loading...</main>;
   }
 
   return (
