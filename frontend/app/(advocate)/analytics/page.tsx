@@ -19,8 +19,10 @@ export default function AdvocateAnalyticsPage() {
   const [distribution, setDistribution] = useState<any[]>([]);
   const [complaints, setComplaints] = useState<any[]>([]);
   const [flags, setFlags] = useState<any[]>([]);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const run = async () => {
       const [a, b, c, d] = await Promise.all([
         fetch(`${API_BASE.analytics}/analytics/commission-trends`).then((r) => r.json()),
@@ -43,44 +45,50 @@ export default function AdvocateAnalyticsPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="card h-80">
           <p className="mb-3 text-sm font-medium">Commission Rate Trends</p>
-          <ResponsiveContainer width="100%" height="90%">
-            <LineChart data={commission}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Line dataKey="avg_rate" stroke="#2563eb" />
-            </LineChart>
-          </ResponsiveContainer>
+          {mounted ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={commission}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line dataKey="avg_rate" stroke="#2563eb" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : null}
         </div>
 
         <div className="card h-80">
           <p className="mb-3 text-sm font-medium">Income Distribution by Zone</p>
-          <ResponsiveContainer width="100%" height="90%">
-            <BarChart data={distribution}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="zone" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="bucket_0_20k" fill="#60a5fa" />
-              <Bar dataKey="bucket_20_40k" fill="#34d399" />
-              <Bar dataKey="bucket_40_60k" fill="#f59e0b" />
-              <Bar dataKey="bucket_60k_plus" fill="#f87171" />
-            </BarChart>
-          </ResponsiveContainer>
+          {mounted ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={distribution}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="zone" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="bucket_0_20k" fill="#60a5fa" />
+                <Bar dataKey="bucket_20_40k" fill="#34d399" />
+                <Bar dataKey="bucket_40_60k" fill="#f59e0b" />
+                <Bar dataKey="bucket_60k_plus" fill="#f87171" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : null}
         </div>
 
         <div className="card h-80">
           <p className="mb-3 text-sm font-medium">Top Complaint Categories</p>
-          <ResponsiveContainer width="100%" height="90%">
-            <BarChart data={complaints} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis dataKey="category" type="category" width={120} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#a855f7" />
-            </BarChart>
-          </ResponsiveContainer>
+          {mounted ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={complaints} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis type="number" />
+                <YAxis dataKey="category" type="category" width={120} />
+                <Tooltip />
+                <Bar dataKey="count" fill="#a855f7" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : null}
         </div>
 
         <div className="card h-80 overflow-auto">

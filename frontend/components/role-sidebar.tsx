@@ -11,7 +11,7 @@ const roleRoutes: Record<string, Array<{ href: string; label: string }>> = {
     { href: '/certificate', label: 'Certificate' },
     { href: '/community', label: 'Community' },
   ],
-  verifier: [{ href: '/verifier/queue', label: 'Verifier Queue' }],
+  verifier: [{ href: '/queue', label: 'Verifier Queue' }],
   advocate: [
     { href: '/advocate/analytics', label: 'Analytics' },
     { href: '/advocate/grievances', label: 'Grievances' },

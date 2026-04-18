@@ -45,7 +45,7 @@ export default function LoginPage() {
       document.cookie = `fairgig_access_token=${data.access_token}; path=/`;
 
       if (user.role === 'worker') router.push('/dashboard');
-      else if (user.role === 'verifier') router.push('/verifier/queue');
+      else if (user.role === 'verifier') router.push('/queue');
       else router.push('/advocate/analytics');
     } catch (err) {
       console.error(err);
