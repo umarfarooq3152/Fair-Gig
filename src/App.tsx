@@ -10,6 +10,7 @@ import type { AppSection, AuthUser } from './features/app/types';
 import { authBases } from './features/app/config';
 import { fetchWithFallback } from './features/app/helpers';
 
+// --- Main Component ---
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('fairgig_token'));
   const [userId, setUserId] = useState(localStorage.getItem('fairgig_user_id'));
