@@ -1,8 +1,31 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-type UserRole = 'worker' | 'verifier' | 'advocate';
+import React, { useState, useEffect, useMemo, FormEvent } from 'react';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, Cell
+} from 'recharts';
+import {
+  LayoutDashboard,
+  History,
+  AlertTriangle,
+  FileText,
+  CheckCircle2,
+  ExternalLink,
+  ChevronRight,
+  Plus,
+  ArrowUpRight,
+  TrendingDown,
+  User,
+  LogOut
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
-type AuthUser = {
+// --- Types ---
+// (Type definitions follow...)
   id: string;
   name: string;
   email: string;
@@ -932,43 +955,28 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm),
       });
-      if (!res.ok) {
-        setAuthError(getErrorMessage(payload, 'Login failed'));
-        return;
+      const data = await res.json();
+      if (data.access_token) {
+        localStorage.setItem('fairgig_token', data.access_token);
+        localStorage.setItem('fairgig_user_id', data.user_id);
+        setToken(data.access_token);
       }
-
-      localStorage.setItem('fairgig_token', payload.access_token);
-      localStorage.setItem('fairgig_user_id', payload.user_id);
-      setToken(payload.access_token);
-      setUserId(payload.user_id);
-      await fetchProfile(payload.access_token, payload.user_id);
-    } catch {
-      setAuthError('Unable to connect to auth service');
-    } finally {
-      setAuthLoading(false);
+    } catch (e) {
+      console.error('Login failed', e);
     }
-  }
+  };
 
-  async function handleSignup(e: FormEvent) {
-    e.preventDefault();
-    setAuthLoading(true);
-    setAuthError('');
-
+  const fetchInitialData = async () => {
+    setLoading(true);
+    const userId = localStorage.getItem('fairgig_user_id');
     try {
-      const registerPayload: Record<string, string> = {
-        name: registerForm.name,
-        email: registerForm.email,
-        password: registerForm.password,
-        role: registerForm.role,
-      };
+      // Fetch Shifts
+      const sRes = await fetch(`/api/shifts?worker_id=${userId}`);
+      const sData = await sRes.json();
+      setShifts(sData);
 
-      if (registerForm.role === 'worker') {
-        registerPayload.city_zone = registerForm.city_zone;
-        registerPayload.category = registerForm.category;
-        registerPayload.phone = registerForm.phone;
-      }
-
-      const { response: registerRes, payload: registerData } = await fetchWithFallback(authBases, '/register', {
+      // Fetch Anomaly
+      const aRes = await fetch('/api/anomaly/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registerPayload),
@@ -1608,224 +1616,129 @@ export default function App() {
                 </button>
               </div>
 
-              {mode === 'login' ? (
-                <form className="space-y-3" onSubmit={handleLogin}>
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="Email"
-                    type="email"
-                    required
-                    value={loginForm.email}
-                    onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
-                  />
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="Password"
-                    type="password"
-                    required
-                    value={loginForm.password}
-                    onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
-                  />
-                  <button
-                    className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                    type="submit"
-                    disabled={authLoading}
-                  >
-                    {authLoading ? 'Logging in...' : 'Login'}
-                  </button>
-                </form>
-              ) : (
-                <form className="space-y-3" onSubmit={handleSignup}>
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="Full Name"
-                    required
-                    value={registerForm.name}
-                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, name: e.target.value }))}
-                  />
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="Email"
-                    type="email"
-                    required
-                    value={registerForm.email}
-                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, email: e.target.value }))}
-                  />
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="Password"
-                    type="password"
-                    minLength={6}
-                    required
-                    value={registerForm.password}
-                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, password: e.target.value }))}
-                  />
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Role</label>
-                  <select
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={registerForm.role}
-                    onChange={(e) => setRegisterForm((prev) => ({ ...prev, role: e.target.value as UserRole }))}
-                  >
-                    {roles.map((role) => (
-                      <option key={role} value={role}>
-                        {role}
-                      </option>
-                    ))}
-                  </select>
-
-                  {registerForm.role === 'worker' && (
-                    <>
-                      <select
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        value={registerForm.city_zone}
-                        onChange={(e) => setRegisterForm((prev) => ({ ...prev, city_zone: e.target.value }))}
-                      >
-                        {zones.map((zone) => (
-                          <option key={zone} value={zone}>
-                            {zone}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        value={registerForm.category}
-                        onChange={(e) => setRegisterForm((prev) => ({ ...prev, category: e.target.value }))}
-                      >
-                        {categories.map((category) => (
-                          <option key={category} value={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        placeholder="Phone Number (optional)"
-                        value={registerForm.phone}
-                        onChange={(e) => setRegisterForm((prev) => ({ ...prev, phone: e.target.value }))}
-                      />
-                    </>
-                  )}
-
-                  <button
-                    className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                    type="submit"
-                    disabled={authLoading}
-                  >
-                    {authLoading ? 'Creating account...' : 'Create Account'}
-                  </button>
-                </form>
-              )}
-
-              {authError && <p className="mt-3 text-sm font-medium text-red-600">{authError}</p>}
-            </section>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-sm font-bold text-text-main">{MOCK_USER.name}</div>
+            <div className="text-[10px] text-text-muted tracking-wide">ID: {MOCK_USER.id}</div>
+          </div>
+          <div className="w-9 h-9 bg-gray-100 border border-border-dim rounded-full flex items-center justify-center">
+            <User className="w-5 h-5 text-text-muted" />
           </div>
         </div>
-      </main>
-    );
-  }
+      </header>
 
-  const visibleShifts = shifts.slice(0, 8);
-
-  return (
-    <main className="min-h-screen bg-slate-100 lg:flex">
-      <aside className="border-b border-slate-800 bg-slate-950 px-4 py-4 text-slate-100 lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:border-b-0 lg:border-r lg:px-5 lg:py-6">
-        <div className="mb-4 border-b border-slate-800 pb-4">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">FairGig Workspace</p>
-          <h2 className="mt-2 text-lg font-bold">Dashboard</h2>
-          <p className="mt-1 text-xs text-slate-400">{user?.name || 'User'} · {user?.role || 'unknown'}</p>
-        </div>
-
-        <nav className="space-y-1.5">
-          <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">Navigation</p>
-          {user?.role === 'worker' && (
-            <>
-              <button
-                type="button"
-                className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm font-semibold transition ${activeSection === 'earnings' ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-200' : 'border-slate-800 bg-slate-900 text-slate-200 hover:border-slate-700 hover:bg-slate-800'}`}
-                onClick={() => setActiveSection('earnings')}
-              >
-                Earnings
-              </button>
-              <button
-                type="button"
-                className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm font-semibold transition ${activeSection === 'community' ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-200' : 'border-slate-800 bg-slate-900 text-slate-200 hover:border-slate-700 hover:bg-slate-800'}`}
-                onClick={() => setActiveSection('community')}
-              >
-                Community Board
-              </button>
-            </>
-          )}
-
-          {user?.role === 'advocate' && (
-            <>
-              <button
-                type="button"
-                className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm font-semibold transition ${activeSection === 'community' ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-200' : 'border-slate-800 bg-slate-900 text-slate-200 hover:border-slate-700 hover:bg-slate-800'}`}
-                onClick={() => setActiveSection('community')}
-              >
-                Community Board
-              </button>
-              <button
-                type="button"
-                className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm font-semibold transition ${activeSection === 'advocate' ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-200' : 'border-slate-800 bg-slate-900 text-slate-200 hover:border-slate-700 hover:bg-slate-800'}`}
-                onClick={() => {
-                  setActiveSection('advocate');
-                  void loadAdvocateComplaints();
-                }}
-              >
-                Advocate Panel
-              </button>
-            </>
-          )}
-
-          {user?.role === 'verifier' && (
-            <button
-              type="button"
-              className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm font-semibold transition ${activeSection === 'verifier' ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-200' : 'border-slate-800 bg-slate-900 text-slate-200 hover:border-slate-700 hover:bg-slate-800'}`}
-              onClick={() => setActiveSection('verifier')}
+      {/* Main Content */}
+      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+        <AnimatePresence mode="wait">
+          {activeTab === 'dashboard' && (
+            <motion.div
+              key="dashboard"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="grid grid-cols-1 md:grid-cols-4 gap-5"
             >
-              Verifier Queue
-            </button>
-          )}
-        </nav>
+              {/* Hero Chart Card */}
+              <div className="card-bento md:col-span-2 md:row-span-2">
+                <div className="flex justify-between mb-4">
+                  <div className="card-title-bento">Earnings Overview (30D)</div>
+                  <div className="text-[10px] font-bold text-brand bg-brand/10 px-2 py-0.5 rounded-full">+12.5%</div>
+                </div>
+                <div className="big-value">Rs. 85,400</div>
+                <div className="text-xs text-text-muted mb-4 font-medium flex items-center gap-1">
+                  Total verified earnings across platforms
+                </div>
+                <div className="flex-1 min-h-[240px] mt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={EARNINGS_TREND}>
+                      <defs>
+                        <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                      <XAxis dataKey="name" hide />
+                      <YAxis hide domain={['dataMin - 500', 'dataMax + 500']} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: '#fff', 
+                          borderRadius: '12px', 
+                          border: '1px solid #E5E7EB',
+                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                        }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke="#10b981" 
+                        strokeWidth={3}
+                        fillOpacity={1} 
+                        fill="url(#colorValue)" 
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
 
-        <button
-          type="button"
-          onClick={logout}
-          className="mt-6 w-full rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
-        >
-          Logout
-        </button>
-      </aside>
+              {/* Stat Card 1 */}
+              <div className="card-bento bg-white">
+                <div className="card-title-bento">Verification</div>
+                <div className="mt-2">
+                  <span className="badge-bento">94% Success</span>
+                </div>
+                <div className="big-value text-2xl mt-4">28 / 30</div>
+                <div className="text-xs text-text-muted font-medium">Shifts verified this month</div>
+              </div>
 
-      <div className="flex-1 px-4 py-6 lg:px-8 lg:py-8">
-        <div className="mx-auto max-w-6xl space-y-6">
-          <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-2xl font-black text-slate-900">Earnings Service</h1>
-              <p className="text-sm text-slate-600">
-                Logged in as <span className="font-semibold">{user?.name || 'User'}</span> ({user?.role || 'unknown'})
-              </p>
-            </div>
-            {activeSection === 'community' && (
-              <button
-                type="button"
-                onClick={() => void loadCommunityBoard()}
-                className="mt-3 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 sm:mt-0"
-              >
-                Refresh Board
-              </button>
-            )}
-          </header>
+              {/* Anomaly Card */}
+              <div className={`card-bento ${anomaly?.anomalies?.length > 0 ? 'bg-red-50 border-red-100' : 'bg-white'}`}>
+                {anomaly?.anomalies?.length > 0 ? (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="w-5 h-5 text-danger" />
+                      <div className="text-xs font-bold text-danger uppercase tracking-wider">Anomaly Flagged</div>
+                    </div>
+                    <div className="text-[13px] font-bold text-text-main mb-1">{anomaly.anomalies[0].type.replace('_', ' ')}</div>
+                    <p className="text-[11px] leading-relaxed text-text-main opacity-80">
+                      {anomaly.anomalies[0].explanation}. Our service suggests a dispute.
+                    </p>
+                    <div className="mt-auto">
+                      <button className="text-[10px] font-bold text-danger underline underline-offset-2">View Analysis</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle2 className="w-5 h-5 text-brand" />
+                      <div className="text-xs font-bold text-brand uppercase tracking-wider">System Healthy</div>
+                    </div>
+                    <div className="text-[13px] font-bold text-text-main mb-1">No Anomalies</div>
+                    <p className="text-[11px] leading-relaxed text-text-muted">
+                      Your deduction rates are within platform norms for your zone.
+                    </p>
+                  </>
+                )}
+              </div>
 
-          <section>
-        {user?.role === 'worker' ? (
-          activeSection === 'community' ? (
-            <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">Community Board</h2>
-                  <p className="text-xs text-slate-500">Reddit-style public feed of worker complaints and platform trends.</p>
+              {/* Stat Card 2 */}
+              <div className="card-bento bg-white">
+                <div className="card-title-bento">Hourly Rate</div>
+                <div className="big-value text-2xl">Rs. 274/hr</div>
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-xs font-bold text-brand">Superior</span>
+                  <span className="text-[10px] text-text-muted">Avg: Rs. 260</span>
+                </div>
+              </div>
+
+              {/* Median Card */}
+              <div className="card-bento bg-white">
+                <div className="card-title-bento">City Comparison</div>
+                <div className="text-[11px] font-bold mb-3">{MOCK_USER.city_zone} Median</div>
+                <div className="w-full h-2 bg-gray-100 rounded-full relative overflow-visible">
+                  <div className="absolute top-0 left-0 h-full bg-brand rounded-full" 
+                       style={{ width: `${Math.min(100, (avgHourlyRate / (median * 1.5)) * 100)}%` }} />
+                  <div className="absolute top-[-4px] left-[66%] h-4 w-0.5 bg-black" />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -1877,427 +1790,133 @@ export default function App() {
                 </select>
               </div>
 
-              {communityError && <p className="text-sm font-medium text-red-600">{communityError}</p>}
-              {communitySuccess && <p className="text-sm font-medium text-emerald-700">{communitySuccess}</p>}
-
-              {communityLoading ? (
-                <p className="text-sm text-slate-600">Loading community feed...</p>
-              ) : communityItems.length === 0 ? (
-                <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No posts found for selected filters.</p>
-              ) : (
-                <div className="space-y-3">
-                  {communityItems.map((item) => (
-                    <div key={item.id} className="flex gap-3 rounded-xl border border-slate-200 bg-white p-3">
-                      <div className="w-14 shrink-0 rounded-lg bg-slate-100 px-2 py-3 text-center">
-                        <p className="text-lg font-black text-slate-900">{item.upvotes ?? 0}</p>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">votes</p>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                          {item.platform} · {item.category}
-                        </p>
-                        <h3 className="mt-1 text-sm font-semibold text-slate-900">{item.description.slice(0, 90)}</h3>
-                        <p className="mt-1 text-sm text-slate-700">{item.description}</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold capitalize text-slate-700">{item.status}</span>
-                          <span>{item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown date'}</span>
+              {/* Recent Activity Card */}
+              <div className="card-bento md:col-span-2">
+                <div className="card-title-bento">Recent Verified Shifts</div>
+                <div className="space-y-1">
+                  {shifts.slice(0, 3).map((shift) => (
+                    <div key={shift.id} className="flex items-center justify-between py-2 border-b border-border-dim last:border-0 hover:bg-gray-50/50 px-2 rounded-lg transition-colors cursor-pointer group">
+                      <div className="flex items-center gap-3">
+                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                          shift.platform === 'Careem' ? 'bg-green-100 text-green-700' : 
+                          shift.platform === 'Bykea' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100'
+                        }`}>
+                          {shift.platform}
                         </div>
+                        <div className="text-xs font-semibold text-text-main">{shift.shift_date}</div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-xs font-black">Rs. {shift.net_received}</div>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-brand" />
+                        <ChevronRight className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                     </div>
                   ))}
                 </div>
-              )}
-            </section>
-          ) : (
-          <section className="grid gap-6 lg:grid-cols-2">
-            <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-bold text-slate-900">Add Earnings</h2>
-
-              <div className="flex gap-2 rounded-xl bg-slate-100 p-1">
-                <button
-                  type="button"
-                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold ${entryMode === 'manual' ? 'bg-white shadow' : 'text-slate-600'}`}
-                  onClick={() => {
-                    setEntryMode('manual');
-                    setCsvError('');
-                  }}
-                >
-                  Manual
-                </button>
-                <button
-                  type="button"
-                  className={`w-1/2 rounded-lg px-3 py-2 text-sm font-semibold ${entryMode === 'csv' ? 'bg-white shadow' : 'text-slate-600'}`}
-                  onClick={() => {
-                    setEntryMode('csv');
-                    setEarningsError('');
-                  }}
-                >
-                  CSV Upload
-                </button>
               </div>
 
-              {entryMode === 'manual' ? (
-                <form onSubmit={handleAddEarning} className="space-y-3">
-                  <label className="block text-sm font-medium text-slate-700">Platform</label>
-                  <select
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={shiftForm.platform}
-                    onChange={(e) => setShiftForm((prev) => ({ ...prev, platform: e.target.value }))}
-                  >
-                    {platforms.map((platform) => (
-                      <option key={platform} value={platform}>
-                        {platform}
-                      </option>
-                    ))}
-                  </select>
-
-                  <label className="block text-sm font-medium text-slate-700">Shift Date</label>
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    type="date"
-                    required
-                    value={shiftForm.shift_date}
-                    onChange={(e) => setShiftForm((prev) => ({ ...prev, shift_date: e.target.value }))}
-                  />
-
-                  <label className="block text-sm font-medium text-slate-700">Hours Worked</label>
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    required
-                    value={shiftForm.hours_worked}
-                    onChange={(e) => setShiftForm((prev) => ({ ...prev, hours_worked: e.target.value }))}
-                  />
-
-                  <label className="block text-sm font-medium text-slate-700">Gross Earned (PKR)</label>
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={shiftForm.gross_earned}
-                    onChange={(e) => setShiftForm((prev) => ({ ...prev, gross_earned: e.target.value }))}
-                  />
-
-                  <label className="block text-sm font-medium text-slate-700">Platform Deductions (PKR)</label>
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={shiftForm.platform_deductions}
-                    onChange={(e) => setShiftForm((prev) => ({ ...prev, platform_deductions: e.target.value }))}
-                  />
-
-                  <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-                    Net Received (auto): PKR {netPreview.toFixed(2)}
-                  </div>
-
-                  <label className="block text-sm font-medium text-slate-700">Notes</label>
-                  <textarea
-                    className="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={shiftForm.notes}
-                    onChange={(e) => setShiftForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  />
-
-                  <label className="block text-sm font-medium text-slate-700">Screenshot (required)</label>
-                  <input
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs file:font-semibold"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    required
-                    onChange={(e) => {
-                      const selected = e.target.files?.[0] || null;
-                      if (!selected) {
-                        setScreenshotFile(null);
-                        return;
-                      }
-                      if (!supportedImageTypes.includes(selected.type)) {
-                        setEarningsError('Unsupported screenshot type. Allowed: JPG, PNG, WEBP');
-                        setScreenshotFile(null);
-                        return;
-                      }
-                      if (selected.size > maxScreenshotBytes) {
-                        setEarningsError('Screenshot is too large. Max allowed size is 10MB');
-                        setScreenshotFile(null);
-                        return;
-                      }
-                      setEarningsError('');
-                      setScreenshotFile(selected);
-                    }}
-                  />
-                  <p className="text-xs text-slate-500">Unsupported types (like PDF) and files above 10MB are rejected.</p>
-
-                  <button
-                    className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                    type="submit"
-                    disabled={earningsLoading}
-                  >
-                    {earningsLoading ? 'Saving...' : 'Add Earning'}
+              {/* Actions Card */}
+              <div className="card-bento md:col-span-2 flex-row items-center gap-6 overflow-hidden">
+                <div className="flex-1">
+                  <div className="card-title-bento">Quick Actions</div>
+                  <p className="text-[11px] text-text-muted mt-1">Manage your earnings documentation and support requests.</p>
+                </div>
+                <div className="flex gap-3">
+                  <button className="btn-bento btn-bento-outline flex gap-2">
+                    <FileText className="w-4 h-4" />
+                    Certificate
                   </button>
-                </form>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-sm text-slate-700">
-                    Upload CSV using columns: <span className="font-semibold">{csvRequiredColumns.join(', ')}</span>
-                  </p>
-                  <input
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    onChange={(e) => {
-                      const selected = e.target.files?.[0] || null;
-                      void handleCsvFileSelect(selected);
-                    }}
-                  />
-                  {csvFileName && <p className="text-xs text-slate-500">Loaded: {csvFileName}</p>}
-                  {csvError && <p className="text-sm font-medium text-red-600">{csvError}</p>}
-
-                  {csvRows.length > 0 && (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-slate-600">
-                          {csvRows.length} rows parsed. Invalid rows are not uploaded until fixed in CSV and reloaded.
-                        </p>
-                        <button
-                          type="button"
-                          className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-                          disabled={csvBusy || csvRows.every((row) => row.uploaded || row.errors.length > 0)}
-                          onClick={() => void uploadAllValidCsvRows()}
-                        >
-                          Upload All Valid
-                        </button>
-                      </div>
-
-                      <div className="max-h-72 overflow-auto rounded-lg border border-slate-200">
-                        <table className="min-w-full divide-y divide-slate-200 text-xs">
-                          <thead className="bg-slate-50 text-slate-600">
-                            <tr>
-                              <th className="px-2 py-2 text-left">#</th>
-                              <th className="px-2 py-2 text-left">Platform</th>
-                              <th className="px-2 py-2 text-left">Date</th>
-                              <th className="px-2 py-2 text-left">Hours</th>
-                              <th className="px-2 py-2 text-left">Gross</th>
-                              <th className="px-2 py-2 text-left">Deductions</th>
-                              <th className="px-2 py-2 text-left">Net</th>
-                              <th className="px-2 py-2 text-left">Screenshot</th>
-                              <th className="px-2 py-2 text-left">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {csvRows.map((row, index) => (
-                              <tr
-                                key={`${row.rowNumber}-${index}`}
-                                className={
-                                  row.uploaded
-                                    ? 'bg-emerald-100/70'
-                                    : isCsvRowReady(row)
-                                      ? 'bg-emerald-50'
-                                      : ''
-                                }
-                              >
-                                <td className="px-2 py-2">{row.rowNumber}</td>
-                                <td className="px-2 py-2">{row.platform}</td>
-                                <td className="px-2 py-2">{row.shift_date}</td>
-                                <td className="px-2 py-2">{row.hours_worked}</td>
-                                <td className="px-2 py-2">{row.gross_earned}</td>
-                                <td className="px-2 py-2">{row.platform_deductions}</td>
-                                <td className="px-2 py-2">{row.net_received}</td>
-                                <td className="px-2 py-2">
-                                  <label className="inline-flex cursor-pointer items-center rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700">
-                                    Choose Image
-                                    <input
-                                      type="file"
-                                      accept="image/png,image/jpeg,image/webp"
-                                      className="hidden"
-                                      onChange={(e) => selectCsvRowScreenshot(index, e.target.files?.[0] || null)}
-                                    />
-                                  </label>
-                                  <div className="mt-1 text-[10px] text-slate-500">
-                                    {row.screenshotFileName || 'No image selected'}
-                                  </div>
-                                </td>
-                                <td className="px-2 py-2">
-                                  {row.uploaded ? (
-                                    <span className="rounded bg-emerald-100 px-2 py-1 font-semibold text-emerald-700">Uploaded</span>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className="rounded bg-emerald-600 px-2 py-1 font-semibold text-white disabled:opacity-60"
-                                      disabled={csvBusy || !isCsvRowReady(row)}
-                                      onClick={() => void uploadCsvRow(index)}
-                                    >
-                                      Upload
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="space-y-2">
-                        {csvRows
-                          .filter((row) => row.errors.length > 0 || row.uploadError || !row.screenshotFile)
-                          .map((row, index) => (
-                            <div key={`err-${row.rowNumber}-${index}`} className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
-                              Row {row.rowNumber}:{' '}
-                              {[...row.errors, !row.screenshotFile ? 'screenshot image is required' : '', row.uploadError || '']
-                                .filter(Boolean)
-                                .join(' | ')}
-                            </div>
-                          ))}
-                      </div>
-                    </>
-                  )}
+                  <button className="btn-bento btn-bento-primary flex gap-2">
+                    <Plus className="w-4 h-4" />
+                    New Shift
+                  </button>
                 </div>
-              )}
+              </div>
+            </motion.div>
+          )}
 
-              {earningsError && <p className="text-sm font-medium text-red-600">{earningsError}</p>}
-              {earningsSuccess && <p className="text-sm font-medium text-emerald-700">{earningsSuccess}</p>}
-            </section>
-
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-3 text-lg font-bold text-slate-900">Recent Earnings</h2>
-              {visibleShifts.length === 0 ? (
-                <p className="text-sm text-slate-600">No shifts found yet. Add your first earning entry.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-sm">
-                    <thead>
-                      <tr className="text-left text-slate-500">
-                        <th className="px-2 py-2">Date</th>
-                        <th className="px-2 py-2">Platform</th>
-                        <th className="px-2 py-2">Hours</th>
-                        <th className="px-2 py-2">Net</th>
-                        <th className="px-2 py-2">Status</th>
-                        <th className="px-2 py-2">Actions</th>
+          {activeTab === 'shifts' && (
+            <motion.div
+              key="shifts"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-black">My Shifts</h2>
+                <button className="btn-bento btn-bento-primary flex gap-2">
+                  <Plus className="w-4 h-4" />
+                  Log Shift
+                </button>
+              </div>
+              <div className="card-bento p-0 overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-50 border-b border-border-dim">
+                    <tr>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Platform</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Date</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Hours</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Gross (Rs)</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Net (Rs)</th>
+                      <th className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border-dim">
+                    {shifts.map((shift) => (
+                      <tr key={shift.id} className="hover:bg-gray-50 transition-colors cursor-pointer group">
+                        <td className="px-6 py-4">
+                          <span className="text-xs font-bold text-text-main">{shift.platform}</span>
+                        </td>
+                        <td className="px-6 py-4 text-xs font-medium text-text-muted">{shift.shift_date}</td>
+                        <td className="px-6 py-4 text-xs font-medium">{shift.hours_worked}h</td>
+                        <td className="px-6 py-4 text-xs font-bold text-text-muted">Rs. {shift.gross_earned}</td>
+                        <td className="px-6 py-4 text-xs font-black">Rs. {shift.net_received}</td>
+                        <td className="px-6 py-4">
+                          <span className={`badge-bento ${
+                            shift.verification_status === 'verified' ? 'bg-brand/10 text-brand' : 
+                            shift.verification_status === 'pending' ? 'bg-yellow-50 text-warning' : 'bg-red-50 text-danger'
+                          }`}>
+                            {shift.verification_status}
+                          </span>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {visibleShifts.map((shift) => (
-                        <tr key={shift.id}>
-                          <td className="px-2 py-2">{shift.shift_date}</td>
-                          <td className="px-2 py-2">{shift.platform}</td>
-                          <td className="px-2 py-2">{shift.hours_worked}</td>
-                          <td className="px-2 py-2">PKR {Number(shift.net_received).toFixed(2)}</td>
-                          <td className="px-2 py-2 capitalize">{shift.verification_status}</td>
-                          <td className="px-2 py-2">
-                            {shift.verification_status === 'pending' ? (
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  className="rounded bg-slate-800 px-2 py-1 text-xs font-semibold text-white"
-                                  onClick={() => beginEditShift(shift)}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white"
-                                  onClick={() => void deleteShift(shift.id)}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-slate-500">Locked after review</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          )}
 
-              {editingShiftId && editForm && (
-                <form onSubmit={saveShiftEdit} className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <h3 className="text-sm font-semibold text-slate-800">Edit Pending Shift</h3>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <select
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                      value={editForm.platform}
-                      onChange={(e) => setEditForm((prev) => (prev ? { ...prev, platform: e.target.value } : prev))}
-                    >
-                      {platforms.map((platform) => (
-                        <option key={platform} value={platform}>
-                          {platform}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="date"
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                      value={editForm.shift_date}
-                      onChange={(e) => setEditForm((prev) => (prev ? { ...prev, shift_date: e.target.value } : prev))}
-                    />
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                      value={editForm.hours_worked}
-                      onChange={(e) => setEditForm((prev) => (prev ? { ...prev, hours_worked: e.target.value } : prev))}
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                      value={editForm.gross_earned}
-                      onChange={(e) => setEditForm((prev) => (prev ? { ...prev, gross_earned: e.target.value } : prev))}
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                      value={editForm.platform_deductions}
-                      onChange={(e) =>
-                        setEditForm((prev) => (prev ? { ...prev, platform_deductions: e.target.value } : prev))
-                      }
-                    />
-                    <input
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                      value={editForm.notes}
-                      onChange={(e) => setEditForm((prev) => (prev ? { ...prev, notes: e.target.value } : prev))}
-                      placeholder="Notes"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button className="rounded bg-emerald-600 px-3 py-1 text-xs font-semibold text-white" type="submit">
-                      Save
-                    </button>
-                    <button
-                      className="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                      type="button"
-                      onClick={() => {
-                        setEditingShiftId(null);
-                        setEditForm(null);
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              )}
-            </section>
-          </section>
-          )
-        ) : user?.role === 'verifier' ? (
-          <section className="grid gap-6 lg:grid-cols-2">
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-bold text-slate-900">Pending Worker Entries</h2>
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                  {filteredPendingQueue.length} / {verifierQueue.length} pending
-                </span>
+          {activeTab === 'grievances' && (
+            <motion.div
+              key="grievances"
+              className="flex items-center justify-center p-20"
+            >
+              <div className="text-center">
+                <AlertTriangle className="w-12 h-12 text-warning mx-auto mb-4" />
+                <h2 className="text-xl font-bold mb-2">Grievance Board</h2>
+                <p className="text-sm text-text-muted max-w-xs mx-auto">
+                  Report platform irregularities or deduction discrepancies. Our advocates review escalated cases.
+                </p>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'certificate' && (
+            <motion.div
+              key="certificate"
+              className="card-bento max-w-2xl mx-auto shadow-2xl p-0 border-double border-4 border-gray-100"
+            >
+              <div className="bg-emerald-800 text-white p-12 text-center relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <LayoutDashboard className="w-32 h-32" />
+                </div>
+                <div className="flex flex-col items-center">
+                  <CheckCircle2 className="w-16 h-16 mb-4 text-brand" />
+                  <h1 className="text-3xl font-black uppercase tracking-widest mb-2">FairGig Certified</h1>
+                  <p className="text-emerald-100 text-[10px] tracking-[0.2em] uppercase font-bold">Verified Income Statement</p>
+                </div>
               </div>
 
               <div className="mb-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-3">
@@ -2420,121 +2039,72 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-              )}
-            </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-bold text-slate-900">My Reviewed Entries</h2>
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                  {myReviewedShifts.length} total
-                </span>
-              </div>
-
-              {Object.keys(myReviewedByWorker).length === 0 ? (
-                <p className="text-sm text-slate-600">No entries reviewed by you yet.</p>
-              ) : (
-                <div className="space-y-4">
-                  {Object.entries(myReviewedByWorker).map(([workerLabel, entries]) => (
-                    <div key={workerLabel} className="rounded-xl border border-slate-200 p-3">
-                      <h3 className="mb-2 text-sm font-semibold text-slate-800">{workerLabel}</h3>
-                      <ul className="space-y-2 text-xs text-slate-700">
-                        {entries.slice(0, 12).map((entry) => (
-                          <li key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span>
-                                {entry.shift_date} • {entry.platform} • Net PKR {Number(entry.net_received).toFixed(2)}
-                              </span>
-                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold capitalize">
-                                {entry.verification_status}
-                              </span>
-                            </div>
-                            {entry.screenshot_url && (
-                              <button
-                                type="button"
-                                className="mt-2 overflow-hidden rounded-lg border border-slate-300 bg-white"
-                                onClick={() => setPreviewScreenshotUrl(entry.screenshot_url || null)}
-                              >
-                                <img
-                                  src={entry.screenshot_url}
-                                  alt="Reviewed shift proof"
-                                  className="h-16 w-28 object-cover"
-                                />
-                              </button>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                <div className="text-center">
+                  <p className="text-[10px] text-text-muted italic mb-6">
+                    This document certifies that the individual named above has successfully verified their platform earnings through FairGig protocols as of {new Date().toLocaleDateString()}.
+                  </p>
+                  <button 
+                    onClick={() => window.print()}
+                    className="btn-bento btn-bento-primary no-print"
+                  >
+                    Download Certificate (PDF)
+                  </button>
                 </div>
-              )}
+              </div>
+            </motion.div>
+          )}
 
-              {decisionError && <p className="mt-3 text-sm font-medium text-red-600">{decisionError}</p>}
-              {decisionSuccess && <p className="mt-3 text-sm font-medium text-emerald-700">{decisionSuccess}</p>}
-            </section>
-          </section>
-        ) : user?.role === 'advocate' ? (
-          activeSection === 'community' ? (
-            <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-slate-900">Community Board</h2>
-                <p className="text-xs text-slate-500">Advocate view of public trend feed</p>
+          {activeTab === 'analytics' && user?.role === 'advocate' && (
+            <motion.div
+              key="analytics"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-black">Advocate Analytics Panel</h2>
+                <div className="text-xs font-bold text-text-muted uppercase tracking-widest bg-gray-100 px-3 py-1 rounded-full border border-border-dim">
+                  Live Market View
+                </div>
               </div>
-              {communityError && <p className="text-sm font-medium text-red-600">{communityError}</p>}
-              {communitySuccess && <p className="text-sm font-medium text-emerald-700">{communitySuccess}</p>}
-              <div className="grid gap-2 sm:grid-cols-2">
-                <select
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  value={communityFilterPlatform}
-                  onChange={(e) => setCommunityFilterPlatform(e.target.value)}
-                >
-                  <option value="all">All Platforms</option>
-                  {platforms.map((platform) => (
-                    <option key={platform} value={platform}>
-                      {platform}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  value={communityFilterCategory}
-                  onChange={(e) => setCommunityFilterCategory(e.target.value)}
-                >
-                  <option value="all">All Categories</option>
-                  <option value="commission_hike">commission_hike</option>
-                  <option value="account_deactivation">account_deactivation</option>
-                  <option value="payment_delay">payment_delay</option>
-                  <option value="unfair_rating">unfair_rating</option>
-                  <option value="data_privacy">data_privacy</option>
-                  <option value="other">other</option>
-                </select>
-              </div>
-              {communityLoading ? (
-                <p className="text-sm text-slate-600">Loading community feed...</p>
-              ) : communityItems.length === 0 ? (
-                <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No posts found for selected filters.</p>
-              ) : (
-                <div className="space-y-3">
-                  {communityItems.map((item) => (
-                    <div key={item.id} className="flex gap-3 rounded-xl border border-slate-200 bg-white p-3">
-                      <div className="w-14 shrink-0 rounded-lg bg-slate-100 px-2 py-3 text-center">
-                        <p className="text-lg font-black text-slate-900">{item.upvotes ?? 0}</p>
-                        <p className="text-[10px] uppercase tracking-wide text-slate-500">votes</p>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                          {item.platform} · {item.category}
-                        </p>
-                        <h3 className="mt-1 text-sm font-semibold text-slate-900">{item.description.slice(0, 90)}</h3>
-                        <p className="mt-1 text-sm text-slate-700">{item.description}</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold capitalize text-slate-700">{item.status}</span>
-                          <span>{item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown date'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Income Distribution */}
+                <div className="card-bento col-span-2">
+                  <div className="card-title-bento mb-6">Income Distribution by Zone</div>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={distributionData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                        <XAxis dataKey="zone" tick={{ fontSize: 10, fontWeight: 700 }} interval={0} angle={-45} textAnchor="end" />
+                        <YAxis tick={{ fontSize: 10, fontWeight: 700 }} />
+                        <Tooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }} />
+                        <Bar dataKey="<20k" fill="#10b981" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="20k-40k" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="40k-60k" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="60k+" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Commission Trends */}
+                <div className="card-bento md:col-span-1">
+                  <div className="card-title-bento mb-4">Commission Trends (Last 6M)</div>
+                  <div className="h-[240px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={trendsData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                        <XAxis dataKey="month" hide />
+                        <YAxis tick={{ fontSize: 8 }} domain={[0, 0.4]} />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="avg_rate" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-[10px] text-text-muted mt-2 uppercase font-bold text-center">Average multi-platform commission rate</p>
                 </div>
               )}
             </section>
