@@ -98,6 +98,22 @@ type ComplaintItem = {
   created_at?: string;
 };
 
+type ComplaintCluster = {
+  id: string;
+  name: string;
+  platform?: string | null;
+  primary_tag?: string | null;
+  complaint_count?: number;
+};
+
+type ComplaintSpike = {
+  platform: string;
+  category: string;
+  count: number;
+  first_seen_at?: string;
+  latest_seen_at?: string;
+};
+
 type AppSection = 'earnings' | 'community' | 'advocate' | 'verifier';
 
 const roles: UserRole[] = ['worker', 'verifier', 'advocate'];
@@ -308,6 +324,14 @@ export default function App() {
   const [communitySuccess, setCommunitySuccess] = useState('');
   const [communityFilterPlatform, setCommunityFilterPlatform] = useState('all');
   const [communityFilterCategory, setCommunityFilterCategory] = useState('all');
+  const [selectedAdvocateIds, setSelectedAdvocateIds] = useState<string[]>([]);
+  const [clusterName, setClusterName] = useState('Systemic Issue Cluster');
+  const [clusterTag, setClusterTag] = useState('payment_delay');
+  const [bulkTagsInput, setBulkTagsInput] = useState('');
+  const [existingClusterId, setExistingClusterId] = useState('');
+  const [advocateActionBusy, setAdvocateActionBusy] = useState(false);
+  const [complaintClusters, setComplaintClusters] = useState<ComplaintCluster[]>([]);
+  const [complaintSpikes, setComplaintSpikes] = useState<ComplaintSpike[]>([]);
   const [showCreateComplaintModal, setShowCreateComplaintModal] = useState(false);
   const [showMyComplaintsModal, setShowMyComplaintsModal] = useState(false);
   const [myComplaints, setMyComplaints] = useState<ComplaintItem[]>([]);
@@ -392,6 +416,16 @@ export default function App() {
     return grouped;
   }, [myReviewedShifts]);
 
+  const selectedAdvocateItems = useMemo(
+    () => advocateItems.filter((item) => selectedAdvocateIds.includes(item.id)),
+    [advocateItems, selectedAdvocateIds],
+  );
+
+  const selectedClusterId = useMemo(() => {
+    const clusterIds = Array.from(new Set(selectedAdvocateItems.map((item) => item.cluster_id).filter(Boolean))) as string[];
+    return clusterIds.length === 1 ? clusterIds[0] : '';
+  }, [selectedAdvocateItems]);
+
   async function loadCommunityBoard() {
     setCommunityLoading(true);
     setCommunityError('');
@@ -434,6 +468,32 @@ export default function App() {
       setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
     } finally {
       setCommunityLoading(false);
+    }
+  }
+
+  async function loadComplaintClusters() {
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/clusters?limit=100', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (response.ok) {
+        setComplaintClusters(Array.isArray(payload) ? payload : []);
+      }
+    } catch {
+      setComplaintClusters([]);
+    }
+  }
+
+  async function loadComplaintSpikes() {
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/alerts/spikes?window_hours=3&min_count=5', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (response.ok) {
+        setComplaintSpikes(Array.isArray(payload?.items) ? payload.items : []);
+      }
+    } catch {
+      setComplaintSpikes([]);
     }
   }
 
@@ -521,6 +581,231 @@ export default function App() {
 
     setAdvocateItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...payload } : item)));
     setCommunitySuccess('Complaint updated');
+  }
+
+  function toggleAdvocateSelection(id: string) {
+    setSelectedAdvocateIds((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]));
+  }
+
+  function toggleAllAdvocateSelection(checked: boolean) {
+    if (!checked) {
+      setSelectedAdvocateIds([]);
+      return;
+    }
+    setSelectedAdvocateIds(advocateItems.map((item) => item.id));
+  }
+
+  async function assignTagsToSelectedComplaints() {
+    const tags = bulkTagsInput
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+    if (selectedAdvocateIds.length < 1) {
+      setCommunityError('Select at least one complaint first');
+      return;
+    }
+    if (!tags.length) {
+      setCommunityError('Enter one or more tags separated by commas');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/bulk/tags', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ complaint_ids: selectedAdvocateIds, tags }),
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not assign tags'));
+        return;
+      }
+
+      setAdvocateItems((prev) => prev.map((item) => (selectedAdvocateIds.includes(item.id) ? { ...item, tags } : item)));
+      setSelectedAdvocateIds([]);
+      setCommunitySuccess(`Assigned tags to ${payload?.updated_count || 0} complaints`);
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function createClusterFromSelected() {
+    if (selectedAdvocateIds.length < 2) {
+      setCommunityError('Select at least two complaints to create a cluster');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/cluster', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          complaint_ids: selectedAdvocateIds,
+          name: clusterName || `Cluster ${new Date().toLocaleString()}`,
+          primary_tag: clusterTag || 'untagged',
+          platform: selectedAdvocateItems[0]?.platform || null,
+        }),
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not create cluster'));
+        return;
+      }
+
+      const clusterId = payload?.cluster?.id;
+      const linkedIds: string[] = payload?.linked_complaint_ids || [];
+      setAdvocateItems((prev) =>
+        prev.map((item) =>
+          linkedIds.includes(item.id)
+            ? { ...item, cluster_id: clusterId }
+            : item,
+        ),
+      );
+      setSelectedAdvocateIds([]);
+      setCommunitySuccess(`Cluster created. Linked ${payload?.linked_count || 0} complaints.`);
+      await loadComplaintClusters();
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function addToExistingCluster() {
+    if (!existingClusterId) {
+      setCommunityError('Select an existing cluster first');
+      return;
+    }
+    if (selectedAdvocateIds.length < 1) {
+      setCommunityError('Select at least one complaint');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/cluster/${existingClusterId}/add`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ complaint_ids: selectedAdvocateIds }),
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not add complaints to cluster'));
+        return;
+      }
+
+      const linkedIds: string[] = payload?.linked_complaint_ids || [];
+      setAdvocateItems((prev) =>
+        prev.map((item) =>
+          linkedIds.includes(item.id)
+            ? { ...item, cluster_id: existingClusterId }
+            : item,
+        ),
+      );
+      setSelectedAdvocateIds([]);
+      setCommunitySuccess(`Added ${payload?.linked_count || 0} complaints to existing cluster.`);
+      await loadComplaintClusters();
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function setSelectedComplaintStatus(nextStatus: 'escalated' | 'resolved') {
+    if (selectedAdvocateIds.length < 1) {
+      setCommunityError('Select at least one complaint first');
+      return;
+    }
+
+    setAdvocateActionBusy(true);
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      if (selectedClusterId) {
+        const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/cluster/${selectedClusterId}/status`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ status: nextStatus }),
+        });
+
+        if (!response.ok) {
+          setCommunityError(getErrorMessage(payload, 'Could not update cluster status'));
+          return;
+        }
+
+        setAdvocateItems((prev) => prev.map((item) => (item.cluster_id === selectedClusterId ? { ...item, status: nextStatus } : item)));
+        setCommunitySuccess(`Cluster cascade applied to ${payload?.affected_count || 0} complaints.`);
+      } else {
+        const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/bulk/status', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ complaint_ids: selectedAdvocateIds, status: nextStatus }),
+        });
+
+        if (!response.ok) {
+          setCommunityError(getErrorMessage(payload, 'Could not update complaint status'));
+          return;
+        }
+
+        setAdvocateItems((prev) => prev.map((item) => (selectedAdvocateIds.includes(item.id) ? { ...item, status: nextStatus } : item)));
+        setCommunitySuccess(`Updated ${payload?.updated_count || 0} complaints to ${nextStatus}.`);
+      }
+
+      setSelectedAdvocateIds([]);
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    } finally {
+      setAdvocateActionBusy(false);
+    }
+  }
+
+  async function unclusterComplaint(id: string) {
+    setCommunityError('');
+    setCommunitySuccess('');
+    try {
+      const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/${id}/uncluster`, {
+        method: 'PUT',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      if (!response.ok) {
+        setCommunityError(getErrorMessage(payload, 'Could not un-cluster complaint'));
+        return;
+      }
+
+      setAdvocateItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...payload } : item)));
+      setCommunitySuccess('Complaint removed from cluster and moved back to open');
+      await loadComplaintClusters();
+    } catch (error) {
+      setCommunityError(getUnknownErrorMessage(error, 'Could not connect to grievance service'));
+    }
   }
 
   async function fetchProfile(authToken: string, currentUserId: string) {
@@ -1241,6 +1526,11 @@ export default function App() {
     setDecisionSuccess('');
     setCommunityError('');
     setCommunitySuccess('');
+    setSelectedAdvocateIds([]);
+    setComplaintClusters([]);
+    setComplaintSpikes([]);
+    setExistingClusterId('');
+    setBulkTagsInput('');
     setShowCreateComplaintModal(false);
     setShowMyComplaintsModal(false);
     setMyComplaints([]);
@@ -1261,6 +1551,16 @@ export default function App() {
       void loadCommunityBoard();
     }
   }, [communityFilterCategory, communityFilterPlatform, user?.role]);
+
+  useEffect(() => {
+    if (user?.role === 'advocate') {
+      if (activeSection === 'advocate') {
+        void loadAdvocateComplaints();
+        void loadComplaintClusters();
+      }
+      void loadComplaintSpikes();
+    }
+  }, [activeSection, user?.role]);
 
   useEffect(() => {
     if (showMyComplaintsModal && user?.role === 'worker') {
@@ -2239,69 +2539,223 @@ export default function App() {
               )}
             </section>
           ) : (
-            <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-bold text-slate-900">Advocate Moderation Panel</h2>
-              {communityLoading ? (
-                <p className="text-sm text-slate-600">Loading complaints...</p>
-              ) : advocateItems.length === 0 ? (
-                <p className="text-sm text-slate-600">No complaints available.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-xs">
-                    <thead className="bg-slate-50 text-slate-600">
-                      <tr>
-                        <th className="px-2 py-2 text-left">Worker</th>
-                        <th className="px-2 py-2 text-left">Platform</th>
-                        <th className="px-2 py-2 text-left">Category</th>
-                        <th className="px-2 py-2 text-left">Description</th>
-                        <th className="px-2 py-2 text-left">Tags</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {advocateItems.map((item) => (
-                        <tr key={item.id}>
-                          <td className="px-2 py-2">
-                            <div className="font-semibold text-slate-800">{item.worker_name || item.worker_id || 'N/A'}</div>
-                            <div className="text-[11px] text-slate-500">{item.worker_id || '—'}</div>
-                          </td>
-                          <td className="px-2 py-2">{item.platform}</td>
-                          <td className="px-2 py-2">
-                            <select
-                              className="rounded border border-slate-300 px-2 py-1"
-                              value={item.category}
-                              onChange={(e) => void moderateAdvocateComplaint(item.id, { category: e.target.value as any })}
-                            >
-                              <option value="commission_hike">commission_hike</option>
-                              <option value="account_deactivation">account_deactivation</option>
-                              <option value="payment_delay">payment_delay</option>
-                              <option value="unfair_rating">unfair_rating</option>
-                              <option value="data_privacy">data_privacy</option>
-                              <option value="other">other</option>
-                            </select>
-                          </td>
-                          <td className="px-2 py-2">
-                            <textarea
-                              className="min-h-16 w-56 rounded border border-slate-300 px-2 py-1"
-                              defaultValue={item.description}
-                              onBlur={(e) => void moderateAdvocateComplaint(item.id, { description: e.target.value })}
-                            />
-                          </td>
-                          <td className="px-2 py-2">
-                            <input
-                              className="w-40 rounded border border-slate-300 px-2 py-1"
-                              defaultValue={(item.tags || []).join(',')}
-                              onBlur={(e) =>
-                                void moderateAdvocateComplaint(item.id, {
-                                  tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
-                                })
-                              }
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <section className="space-y-4">
+              <div className="grid gap-4 xl:grid-cols-[1fr,280px]">
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-lg font-bold text-slate-900">Advocate Moderation Queue</h2>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                      onClick={() => {
+                        void loadAdvocateComplaints();
+                        void loadComplaintSpikes();
+                        void loadComplaintClusters();
+                      }}
+                    >
+                      Refresh Queue
+                    </button>
+                  </div>
+
+                  {communityLoading ? (
+                    <p className="text-sm text-slate-600">Loading complaints...</p>
+                  ) : advocateItems.length === 0 ? (
+                    <p className="text-sm text-slate-600">No complaints available.</p>
+                  ) : (
+                    <div className="overflow-hidden rounded-lg border border-slate-200">
+                      <div className="grid grid-cols-[32px,150px,120px,1fr,130px,140px] gap-2 border-b border-slate-200 bg-slate-50 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                        <label className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            checked={advocateItems.length > 0 && selectedAdvocateIds.length === advocateItems.length}
+                            onChange={(e) => toggleAllAdvocateSelection(e.target.checked)}
+                          />
+                        </label>
+                        <span>Time</span>
+                        <span>Platform</span>
+                        <span>Preview</span>
+                        <span>Status</span>
+                        <span>Cluster</span>
+                      </div>
+                      <div className="max-h-[65vh] overflow-auto">
+                        {advocateItems.map((item) => (
+                          <div key={item.id} className="grid grid-cols-[32px,150px,120px,1fr,130px,140px] gap-2 border-b border-slate-100 px-2 py-2 text-xs text-slate-700">
+                            <label className="flex items-start justify-center pt-1">
+                              <input
+                                type="checkbox"
+                                checked={selectedAdvocateIds.includes(item.id)}
+                                onChange={() => toggleAdvocateSelection(item.id)}
+                              />
+                            </label>
+                            <div>
+                              <p>{item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</p>
+                              <p className="truncate text-[11px] text-slate-500">{item.worker_name || item.worker_id || 'Unknown'}</p>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-800">{item.platform}</p>
+                              <select
+                                className="mt-1 w-full rounded border border-slate-300 px-1 py-0.5 text-[11px]"
+                                value={item.category}
+                                onChange={(e) => void moderateAdvocateComplaint(item.id, { category: e.target.value as any })}
+                              >
+                                <option value="commission_hike">commission_hike</option>
+                                <option value="account_deactivation">account_deactivation</option>
+                                <option value="payment_delay">payment_delay</option>
+                                <option value="unfair_rating">unfair_rating</option>
+                                <option value="data_privacy">data_privacy</option>
+                                <option value="other">other</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="truncate font-semibold text-slate-900">{item.description.slice(0, 85)}</p>
+                              <textarea
+                                className="h-12 w-full rounded border border-slate-300 px-2 py-1 text-[11px]"
+                                defaultValue={item.description}
+                                onBlur={(e) => void moderateAdvocateComplaint(item.id, { description: e.target.value })}
+                              />
+                              <input
+                                className="w-full rounded border border-slate-300 px-2 py-1 text-[11px]"
+                                defaultValue={(item.tags || []).join(',')}
+                                onBlur={(e) =>
+                                  void moderateAdvocateComplaint(item.id, {
+                                    tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${
+                                  item.status === 'resolved'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : item.status === 'escalated'
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : item.status === 'rejected'
+                                        ? 'bg-rose-100 text-rose-800'
+                                        : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                {item.status}
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="truncate text-[11px] text-slate-500">{item.cluster_id || 'Unclustered'}</p>
+                              {item.cluster_id && (
+                                <button
+                                  type="button"
+                                  className="rounded border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700"
+                                  onClick={() => void unclusterComplaint(item.id)}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                <aside className="space-y-3">
+                  <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-900">Spike Alert (3h)</h3>
+                    <div className="mt-2 space-y-2">
+                      {complaintSpikes.length === 0 ? (
+                        <p className="text-xs text-slate-500">No major spikes detected.</p>
+                      ) : (
+                        complaintSpikes.slice(0, 8).map((spike) => (
+                          <div key={`${spike.platform}-${spike.category}`} className="rounded border border-amber-200 bg-amber-50 p-2">
+                            <p className="text-xs font-semibold text-amber-900">{spike.platform} · {spike.category}</p>
+                            <p className="text-[11px] text-amber-800">{spike.count} complaints in last 3h</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-900">Existing Clusters</h3>
+                    <select
+                      className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs"
+                      value={existingClusterId}
+                      onChange={(e) => setExistingClusterId(e.target.value)}
+                    >
+                      <option value="">Select cluster</option>
+                      {complaintClusters.map((cluster) => (
+                        <option key={cluster.id} value={cluster.id}>
+                          {cluster.name} ({cluster.complaint_count || 0})
+                        </option>
+                      ))}
+                    </select>
+                  </section>
+                </aside>
+              </div>
+
+              {selectedAdvocateIds.length > 0 && (
+                <section className="sticky bottom-3 z-20 rounded-xl border border-slate-900 bg-slate-950 p-3 shadow-xl">
+                  <p className="mb-2 text-sm font-semibold text-white">{selectedAdvocateIds.length} selected</p>
+                  <div className="grid gap-2 md:grid-cols-6">
+                    <input
+                      className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100"
+                      placeholder="Assign tags (comma-separated)"
+                      value={bulkTagsInput}
+                      onChange={(e) => setBulkTagsInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="rounded bg-slate-100 px-2 py-2 text-xs font-semibold text-slate-900 disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void assignTagsToSelectedComplaints()}
+                    >
+                      Assign Tags
+                    </button>
+                    <input
+                      className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100"
+                      placeholder="New cluster name"
+                      value={clusterName}
+                      onChange={(e) => setClusterName(e.target.value)}
+                    />
+                    <input
+                      className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100"
+                      placeholder="Primary tag"
+                      value={clusterTag}
+                      onChange={(e) => setClusterTag(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="rounded bg-sky-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void createClusterFromSelected()}
+                    >
+                      Create Cluster
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void addToExistingCluster()}
+                    >
+                      Add To Existing
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-amber-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void setSelectedComplaintStatus('escalated')}
+                    >
+                      Mark Escalated
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-emerald-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      disabled={advocateActionBusy}
+                      onClick={() => void setSelectedComplaintStatus('resolved')}
+                    >
+                      Mark Resolved
+                    </button>
+                  </div>
+                </section>
               )}
             </section>
           )
