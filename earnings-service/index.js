@@ -338,7 +338,6 @@ app.get('/verifier/queue', async (req, res) => {
        FROM earnings.shifts s
        JOIN auth.users u ON u.id = s.worker_id
        WHERE s.verification_status = 'pending'
-         AND s.screenshot_url IS NOT NULL
        ORDER BY s.created_at ASC`,
     );
     res.json(result.rows);

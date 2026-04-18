@@ -550,10 +550,32 @@ app.post('/shifts/:id/screenshot', uploadScreenshot.single('file'), async (req, 
 });
 
 // ---------------------------------------------------------------------------
-// GET /verifier/queue — uses the v_verifier_queue view
+// GET /verifier/queue — pending shifts for verifier review
 // ---------------------------------------------------------------------------
 app.get('/verifier/queue', async (req, res) => {
-  const result = await pool.query(`SELECT * FROM analytics.v_verifier_queue`);
+  const result = await pool.query(
+    `SELECT
+      s.id AS shift_id,
+      s.worker_id,
+      u.name AS worker_name,
+      u.city_zone::TEXT,
+      u.category::TEXT,
+      s.platform::TEXT,
+      s.shift_date,
+      s.hours_worked,
+      s.gross_earned,
+      s.platform_deductions,
+      s.net_received,
+      s.deduction_rate,
+      s.screenshot_url,
+      s.created_at AS submitted_at
+    FROM earnings.shifts s
+    JOIN auth.users u ON u.id = s.worker_id
+    WHERE s.verification_status = 'pending'
+      AND s.deleted_at IS NULL
+      AND u.deleted_at IS NULL
+    ORDER BY s.created_at ASC`,
+  );
   res.json(result.rows);
 });
 

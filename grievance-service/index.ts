@@ -1,22 +1,28 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
 import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
 import { EventEmitter } from 'events';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const uploadsDir = path.resolve(__dirname, 'uploads');
+fs.mkdirSync(uploadsDir, { recursive: true });
+
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config();
 
 const app = express();
 const PORT = 8004;
 const JWT_SECRET_RAW = process.env.JWT_SECRET;
+const supabaseUrl = process.env.SUPABASE_URL || 'https://rboeauycggsgtdhuipah.supabase.co';
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseBucket = process.env.SUPABASE_BUCKET || 'gig';
 if (!JWT_SECRET_RAW) {
   console.error('FATAL: JWT_SECRET is required (same value as auth-service)');
   process.exit(1);
@@ -30,6 +36,24 @@ const pool = new Pool({
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads/grievance', express.static(uploadsDir));
+
+const complaintUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const safe = String(file.originalname || 'complaint-image').replace(/[^a-zA-Z0-9._-]/g, '_');
+      cb(null, `${Date.now()}-${safe}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      return cb(new Error('Only JPEG, PNG, and WEBP images are allowed'));
+    }
+    cb(null, true);
+  },
+});
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'grievance-service', port: PORT });
@@ -93,6 +117,47 @@ function parsePositiveInt(value: unknown, fallback: number, max: number) {
   return Math.min(parsed, max);
 }
 
+async function uploadComplaintImageToSupabase(
+  filePath: string,
+  originalFileName: string,
+  workerId: string,
+  mimeType: string,
+) {
+  if (!supabaseServiceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing on grievance service');
+  }
+  if (supabaseServiceRoleKey.startsWith('sb_publishable_')) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is set to a publishable key. Use the service_role key from Supabase project settings.');
+  }
+
+  const safeName = (originalFileName || 'complaint.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const objectPath = `${workerId}/complaint-${Date.now()}-${safeName}`;
+  const encodedPath = objectPath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  const buffer = fs.readFileSync(filePath);
+
+  const uploadRes = await fetch(`${supabaseUrl}/storage/v1/object/${supabaseBucket}/${encodedPath}`, {
+    method: 'POST',
+    headers: {
+      apikey: supabaseServiceRoleKey,
+      Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      'Content-Type': mimeType || 'application/octet-stream',
+      'x-upsert': 'false',
+    },
+    body: buffer,
+  });
+
+  if (!uploadRes.ok) {
+    const message = await uploadRes.text();
+    throw new Error(message || 'Supabase storage upload failed');
+  }
+
+  return `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${encodedPath}`;
+}
+
 function encodeCursor(row: { created_at: string; id: string }) {
   return Buffer.from(`${row.created_at}|${row.id}`).toString('base64');
 }
@@ -112,10 +177,27 @@ function decodeCursor(value: unknown): { createdAt: string; id: string } | null 
 // ---------------------------------------------------------------------------
 // POST /api/complaints — Worker complaint create with anti-spam (3/hour)
 // ---------------------------------------------------------------------------
-app.post('/api/complaints', async (req, res) => {
+app.post('/api/complaints', complaintUpload.single('image'), async (req, res) => {
   try {
     const auth = await requireRole(req, ['worker']);
-    const { platform, category, description, is_anonymous, tags } = req.body;
+    const { platform, category, description, tags } = req.body;
+    const is_anonymous = String(req.body?.is_anonymous ?? 'true') === 'true';
+    let image_url: string | null = null;
+
+    if (req.file) {
+      try {
+        image_url = await uploadComplaintImageToSupabase(
+          req.file.path,
+          req.file.originalname,
+          auth.userId,
+          req.file.mimetype,
+        );
+      } finally {
+        if (req.file.path && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      }
+    }
 
     if (!platform || !description) {
       return res.status(400).json({ detail: 'platform and description are required' });
@@ -138,9 +220,9 @@ app.post('/api/complaints', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO grievance.complaints
-       (worker_id, platform, category, description, is_anonymous, tags, status)
-       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open')
-       RETURNING id, platform, category, description, is_anonymous, tags, status, created_at`,
+       (worker_id, platform, category, description, is_anonymous, tags, status, image_url)
+       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open', $7)
+       RETURNING id, platform, category, description, is_anonymous, tags, status, image_url, created_at`,
       [
         auth.userId,
         platform,
@@ -148,6 +230,7 @@ app.post('/api/complaints', async (req, res) => {
         String(description).trim(),
         Boolean(is_anonymous),
         cleanTags(tags),
+        image_url,
       ],
     );
 
@@ -189,6 +272,7 @@ app.get('/api/complaints/mine', async (req, res) => {
          is_anonymous,
          tags,
          status,
+         image_url,
          cluster_id,
          upvotes,
          created_at,
@@ -243,6 +327,7 @@ app.get('/api/complaints/public', async (req, res) => {
          c.is_anonymous,
          c.tags,
          c.status,
+         c.image_url,
          c.cluster_id,
          c.upvotes,
          c.created_at,
@@ -302,6 +387,7 @@ app.get('/api/complaints/advocate', async (req, res) => {
          c.is_anonymous,
          c.tags,
          c.status,
+         c.image_url,
          c.advocate_id,
          c.advocate_note,
          c.cluster_id,
@@ -382,6 +468,7 @@ app.get('/api/complaints/advocate/feed', async (req, res) => {
          c.is_anonymous,
          c.tags,
          c.status,
+         c.image_url,
          c.advocate_id,
          c.advocate_note,
          c.cluster_id,
@@ -1090,6 +1177,7 @@ app.get('/api/complaints/:id', async (req, res) => {
          description,
          tags,
          status,
+         image_url,
          advocate_id,
          cluster_id,
          upvotes,
@@ -1115,9 +1203,24 @@ app.get('/complaints', (req, res) => {
   app.handle(req, res);
 });
 
-app.post('/complaints', async (req, res) => {
+app.post('/complaints', complaintUpload.single('image'), async (req, res) => {
   try {
     const { worker_id, platform, category, description, is_anonymous, tags } = req.body;
+    let image_url: string | null = null;
+    if (req.file) {
+      try {
+        image_url = await uploadComplaintImageToSupabase(
+          req.file.path,
+          req.file.originalname,
+          String(worker_id || ''),
+          req.file.mimetype,
+        );
+      } finally {
+        if (req.file.path && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      }
+    }
     if (!worker_id || !platform || !description) {
       return res.status(400).json({ detail: 'worker_id, platform and description are required' });
     }
@@ -1127,16 +1230,17 @@ app.post('/complaints', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO grievance.complaints
-       (worker_id, platform, category, description, is_anonymous, tags, status)
-       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open')
-       RETURNING id, worker_id, platform, category, description, is_anonymous, tags, status, created_at`,
+       (worker_id, platform, category, description, is_anonymous, tags, status, image_url)
+       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open', $7)
+       RETURNING id, worker_id, platform, category, description, is_anonymous, tags, status, image_url, created_at`,
       [
         String(worker_id),
         String(platform),
         category || 'other',
         String(description).trim(),
-        Boolean(is_anonymous),
+        String(is_anonymous ?? 'true') === 'true',
         cleanTags(tags),
+        image_url,
       ],
     );
 
@@ -1170,6 +1274,11 @@ app.get('/complaints/clusters', (_req, res) => {
     .catch((err: Error) => res.status(400).json({ detail: err.message }));
 });
 
-app.listen(PORT, () => {
-  console.log(`Grievance Service running on port ${PORT}`);
-});
+async function bootstrap() {
+  await pool.query(`ALTER TABLE grievance.complaints ADD COLUMN IF NOT EXISTS image_url TEXT`);
+  app.listen(PORT, () => {
+    console.log(`Grievance Service running on port ${PORT}`);
+  });
+}
+
+void bootstrap();

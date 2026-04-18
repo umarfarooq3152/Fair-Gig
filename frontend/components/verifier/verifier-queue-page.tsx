@@ -28,6 +28,8 @@ type ToastState = {
   message: string;
 };
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
 function normalizeQueueItem(raw: any): QueueShift {
   return {
     id: String(raw?.id || raw?.shift_id || ''),
@@ -46,9 +48,51 @@ function normalizeQueueItem(raw: any): QueueShift {
 
 function resolveImage(url: string | undefined) {
   if (!url) return '';
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  if (url.startsWith('/')) return `${API_BASE.earnings}${url}`;
-  return url;
+  const raw = String(url).trim();
+  if (!raw || raw === 'null' || raw === 'undefined') return '';
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+  if (raw.startsWith('/')) return `${API_BASE.earnings}${raw}`;
+  return `${API_BASE.earnings}/${raw.replace(/^\.\//, '')}`;
+}
+
+function imageCandidates(url: string | undefined) {
+  const raw = String(url || '').trim();
+  if (!raw || raw === 'null' || raw === 'undefined') return [];
+
+  const base = API_BASE.earnings.replace(/\/$/, '');
+  const candidates: string[] = [];
+
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    candidates.push(raw);
+  } else {
+    const cleaned = raw.replace(/^\.\//, '');
+    candidates.push(`${base}/${cleaned.replace(/^\//, '')}`);
+
+    if (cleaned.startsWith('/')) {
+      candidates.push(`${base}${cleaned}`);
+    }
+
+    if (cleaned.includes('uploads/')) {
+      const filename = cleaned.split('uploads/').pop() || '';
+      if (filename) {
+        candidates.push(`${base}/uploads/${filename}`);
+      }
+    }
+
+    if (cleaned.includes('earnings-service/uploads/')) {
+      const filename = cleaned.split('earnings-service/uploads/').pop() || '';
+      if (filename) {
+        candidates.push(`${base}/uploads/${filename}`);
+      }
+    }
+  }
+
+  const normalized = candidates
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => entry.replace('///', '//'));
+
+  return Array.from(new Set(normalized));
 }
 
 function formatDateOnly(value: string) {
@@ -102,8 +146,11 @@ export default function VerifierQueuePage() {
   const [toDate, setToDate] = useState('');
   const [submittingId, setSubmittingId] = useState('');
   const [submittingStatus, setSubmittingStatus] = useState<DecisionStatus | ''>('');
-  const [previewImage, setPreviewImage] = useState('');
+  const [previewImages, setPreviewImages] = useState<string[]>([]);
+  const [previewIndex, setPreviewIndex] = useState(0);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
 
   const pushToast = (kind: ToastKind, message: string) => {
     setToast({ id: Date.now(), kind, message });
@@ -119,14 +166,30 @@ export default function VerifierQueuePage() {
     try {
       setLoading(true);
       setError('');
-      const res = await authFetch(`${API_BASE.earnings}/verifier/queue`, { cache: 'no-store' });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(typeof payload?.detail === 'string' ? payload.detail : 'Could not load verifier queue');
+
+      const queueRes = await authFetch(`${API_BASE.earnings}/verifier/queue`, { cache: 'no-store' });
+
+      const queuePayload = await queueRes.json().catch(() => []);
+
+      if (!queueRes.ok) {
+        const detail = typeof queuePayload?.detail === 'string'
+          ? queuePayload.detail
+          : 'Could not load verifier queue';
+        setError(detail);
         setItems([]);
         return;
       }
-      const rows = Array.isArray(payload) ? payload.map((item) => normalizeQueueItem(item)).filter((item) => item.id) : [];
+
+      const queueRows = Array.isArray(queuePayload)
+        ? queuePayload.map((item) => normalizeQueueItem(item)).filter((item) => item.id)
+        : [];
+
+      const rows = [...queueRows].sort((a, b) => {
+        const aTime = new Date(a.submitted_at || a.created_at || a.shift_date || '').getTime() || 0;
+        const bTime = new Date(b.submitted_at || b.created_at || b.shift_date || '').getTime() || 0;
+        return aTime - bTime;
+      });
+
       setItems(rows);
     } catch {
       setError('Could not load verifier queue');
@@ -164,12 +227,48 @@ export default function VerifierQueuePage() {
     });
   }, [items, search, platformFilter, fromDate, toDate]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  const pagedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredItems.slice(start, start + pageSize);
+  }, [filteredItems, currentPage, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, platformFilter, fromDate, toDate, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
   const resetFilters = () => {
     setSearch('');
     setPlatformFilter('all');
     setFromDate('');
     setToDate('');
+    setPage(1);
   };
+
+  const openPreview = (url: string | undefined) => {
+    const candidates = imageCandidates(url);
+    if (!candidates.length) {
+      pushToast('error', 'No screenshot URL found');
+      return;
+    }
+    setPreviewImages(candidates);
+    setPreviewIndex(0);
+  };
+
+  const closePreview = () => {
+    setPreviewImages([]);
+    setPreviewIndex(0);
+  };
+
+  const activePreviewImage = previewImages[previewIndex] || '';
 
   const decide = async (item: QueueShift, status: DecisionStatus) => {
     const verifierId = localStorage.getItem('fairgig_user_id') || '';
@@ -291,7 +390,7 @@ export default function VerifierQueuePage() {
             </tr>
           </thead>
           <tbody>
-            {filteredItems.map((item) => {
+            {pagedItems.map((item) => {
               const image = resolveImage(item.screenshot_url || item.file_url);
               const busy = submittingId === item.id;
 
@@ -308,14 +407,14 @@ export default function VerifierQueuePage() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => setPreviewImage(image)}
+                          onClick={() => openPreview(item.screenshot_url || item.file_url)}
                           className="inline-flex rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           View
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPreviewImage(image)}
+                          onClick={() => openPreview(item.screenshot_url || item.file_url)}
                           className="inline-flex rounded-lg border border-slate-300 p-1 text-slate-600 hover:bg-slate-50"
                           aria-label="Expand screenshot"
                         >
@@ -372,17 +471,69 @@ export default function VerifierQueuePage() {
         </table>
       </div>
 
-      {previewImage ? (
+      {filteredItems.length ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span>Rows per page</span>
+            <select
+              value={pageSize}
+              onChange={(event) => setPageSize(Number(event.target.value) as (typeof PAGE_SIZE_OPTIONS)[number])}
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm text-slate-700"
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={currentPage <= 1}
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50"
+          >
+            Prev
+          </button>
+          <span className="text-sm text-slate-600">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={currentPage >= totalPages}
+            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50"
+          >
+            Next
+          </button>
+          </div>
+        </div>
+      ) : null}
+
+      {activePreviewImage ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <button
             type="button"
-            onClick={() => setPreviewImage('')}
+            onClick={closePreview}
             className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white"
             aria-label="Close screenshot preview"
           >
             <X size={18} />
           </button>
-          <img src={previewImage} alt="queue screenshot preview" className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain" />
+          <img
+            src={activePreviewImage}
+            alt="queue screenshot preview"
+            className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"
+            onError={() => {
+              if (previewIndex < previewImages.length - 1) {
+                setPreviewIndex((current) => current + 1);
+                return;
+              }
+              pushToast('error', 'Could not load screenshot preview');
+            }}
+          />
         </div>
       ) : null}
 

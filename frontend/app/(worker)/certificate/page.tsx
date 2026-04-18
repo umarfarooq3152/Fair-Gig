@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, authFetch } from '@/lib/api';
 
 type Shift = {
+  id?: string;
+  shift_date?: string;
   platform: string;
   hours_worked: number;
   gross_earned: number;
@@ -12,10 +14,52 @@ type Shift = {
   verification_status: string;
 };
 
+function getTodayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getStartOfCurrentMonthIso() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+}
+
+function formatDateOnly(value?: string) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(d);
+}
+
+function normalizeShiftList(payload: unknown): Shift[] {
+  if (Array.isArray(payload)) return payload as Shift[];
+  if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>;
+    if (Array.isArray(obj.data)) return obj.data as Shift[];
+    if (Array.isArray(obj.shifts)) return obj.shifts as Shift[];
+    if (Array.isArray(obj.items)) return obj.items as Shift[];
+    if (Array.isArray(obj.rows)) return obj.rows as Shift[];
+  }
+  return [];
+}
+
+function isVerifiedLike(statusRaw: string) {
+  const status = String(statusRaw || '').toLowerCase().trim();
+  return status.includes('verif') || status.includes('approv');
+}
+
+function inDateRange(dateLike: string | undefined, from: string, to: string) {
+  if (!dateLike) return false;
+  const d = new Date(dateLike);
+  if (Number.isNaN(d.getTime())) return false;
+  const day = d.toISOString().slice(0, 10);
+  return day >= from && day <= to;
+}
+
 export default function CertificatePage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
-  const [from, setFrom] = useState(new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString().slice(0, 10));
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [loading, setLoading] = useState(true);
+  const [from, setFrom] = useState(getStartOfCurrentMonthIso());
+  const [to, setTo] = useState(getTodayIso());
   const [profile, setProfile] = useState({
     name: 'Worker',
     id: '',
@@ -25,8 +69,13 @@ export default function CertificatePage() {
 
   useEffect(() => {
     const run = async () => {
+      setLoading(true);
       const workerId = localStorage.getItem('fairgig_user_id');
-      if (!workerId) return;
+      if (!workerId) {
+        setShifts([]);
+        setLoading(false);
+        return;
+      }
 
       setProfile({
         name: localStorage.getItem('fairgig_user_name') || 'Worker',
@@ -35,9 +84,23 @@ export default function CertificatePage() {
         zone: localStorage.getItem('fairgig_city_zone') || '',
       });
 
-      const res = await fetch(`${API_BASE.earnings}/shifts?worker_id=${workerId}&from=${from}&to=${to}`);
-      const data = await res.json();
-      setShifts(data.filter((s: Shift) => s.verification_status === 'verified'));
+      try {
+        const res = await authFetch(`${API_BASE.earnings}/shifts?worker_id=${encodeURIComponent(workerId)}`);
+        const payload = await res.json().catch(() => []);
+        const rows = normalizeShiftList(payload);
+        const approvedRows = rows.filter((s: Shift) => isVerifiedLike(s.verification_status) && inDateRange(s.shift_date, from, to));
+        setShifts(
+          approvedRows.sort((a, b) => {
+            const ad = new Date(a.shift_date || '').getTime();
+            const bd = new Date(b.shift_date || '').getTime();
+            return bd - ad;
+          }),
+        );
+      } catch {
+        setShifts([]);
+      } finally {
+        setLoading(false);
+      }
     };
     run();
   }, [from, to]);
@@ -65,6 +128,14 @@ export default function CertificatePage() {
       avgHourly: totalHours > 0 ? totalNet / totalHours : 0,
     };
   }, [shifts]);
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-[210] flex items-center justify-center bg-white/35 backdrop-blur-sm">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -97,23 +168,30 @@ export default function CertificatePage() {
         <table className="mb-6 w-full border text-sm">
           <thead>
             <tr className="border-b bg-gray-50">
+              <th className="p-2 text-left">Date</th>
               <th className="p-2 text-left">Platform</th>
-              <th className="p-2 text-left">Shifts</th>
+              <th className="p-2 text-left">Hours</th>
               <th className="p-2 text-left">Gross</th>
               <th className="p-2 text-left">Deduct</th>
               <th className="p-2 text-left">Net</th>
             </tr>
           </thead>
           <tbody>
-            {summary.rows.map((row) => (
-              <tr key={row.platform} className="border-b">
+            {shifts.map((row, idx) => (
+              <tr key={row.id || `${row.platform}-${row.shift_date || idx}`} className="border-b">
+                <td className="p-2">{formatDateOnly(row.shift_date)}</td>
                 <td className="p-2">{row.platform}</td>
-                <td className="p-2">{row.shifts}</td>
-                <td className="p-2">Rs. {row.gross.toFixed(0)}</td>
-                <td className="p-2">Rs. {row.deductions.toFixed(0)}</td>
-                <td className="p-2">Rs. {row.net.toFixed(0)}</td>
+                <td className="p-2">{Number(row.hours_worked || 0).toFixed(1)}</td>
+                <td className="p-2">Rs. {Number(row.gross_earned || 0).toFixed(0)}</td>
+                <td className="p-2">Rs. {Number(row.platform_deductions || 0).toFixed(0)}</td>
+                <td className="p-2">Rs. {Number(row.net_received || 0).toFixed(0)}</td>
               </tr>
             ))}
+            {shifts.length === 0 ? (
+              <tr>
+                <td className="p-3 text-sm text-gray-500" colSpan={6}>No verified entries found in selected period.</td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
 
