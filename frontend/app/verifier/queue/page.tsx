@@ -1,5 +1,3 @@
-import { redirect } from 'next/navigation';
+import VerifierQueuePage from '@/components/verifier/verifier-queue-page';
 
-export default function LegacyVerifierQueuePage() {
-  redirect('/queue');
-}
+export default VerifierQueuePage;
