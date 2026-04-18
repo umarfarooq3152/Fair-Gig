@@ -16,8 +16,22 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
+      /** Keep Vite off 3000 so `npm run dev` (Next in frontend/) can bind 3000 without "port in use". */
+      port: 5173,
+      strictPort: false,
+      proxy: {
+        '/api/auth': {
+          target: 'http://127.0.0.1:8001',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/auth/, '/auth'),
+        },
+        '/api/analytics': {
+          target: 'http://127.0.0.1:8005',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/analytics/, '/analytics'),
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };

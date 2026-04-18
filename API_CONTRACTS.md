@@ -45,6 +45,8 @@ All shift routes require Bearer JWT.
 ## Analytics (8005)
 
 - `GET /health`
+- `GET /analytics/advocate-summary` — KPI strip: worker counts, weighted commission MoM, grievance counts, vulnerability count
+- `GET /analytics/income-by-zone-category` — last 30 days net income by `city_zone` × worker `category`
 - `GET /analytics/commission-trends`
 - `GET /analytics/income-distribution?zone=` → `{ zones: [...], histogram: [{ zone, bucket_range, worker_count }] }`
 - `GET /analytics/vulnerability-flags`

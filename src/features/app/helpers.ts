@@ -23,12 +23,16 @@ export async function fetchWithFallback(
 ): Promise<{ response: Response; payload: any }> {
   let lastError: unknown;
 
-  for (const base of bases) {
+  for (let i = 0; i < bases.length; i++) {
+    const base = bases[i];
     try {
       const response = await fetch(joinBase(base, endpoint), options);
       const payload = await parseJsonSafe(response);
 
-      if (response.status === 404 && bases.length > 1) {
+      // Only try the next base when this one is 404 *and* there is another base left.
+      // Previously, a 404 on the last base was skipped and the function threw — so
+      // `http://localhost:8005/...` never "won" over `/api/...` on the dev server.
+      if (response.status === 404 && i < bases.length - 1) {
         continue;
       }
 

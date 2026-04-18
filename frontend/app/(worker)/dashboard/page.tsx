@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { EChartsOption } from 'echarts';
+import { Award, Download, FileText } from 'lucide-react';
 import { API_BASE, authFetch } from '@/lib/api';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), {

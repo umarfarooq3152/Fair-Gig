@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Bell,
-  Clock3,
   Home,
   List,
   LogOut,
@@ -21,13 +20,11 @@ type VerifierShellProps = {
 const navItems = [
   { href: '/verifier/dashboard', label: 'Dashboard', icon: Home },
   { href: '/verifier/queue', label: 'Queue', icon: List },
-  { href: '/verifier/history', label: 'History', icon: Clock3 },
 ];
 
 const titleMap: Record<string, string> = {
   '/verifier/dashboard': 'Dashboard',
   '/verifier/queue': 'Queue',
-  '/verifier/history': 'History',
 };
 
 function getInitials(name: string) {
@@ -65,7 +62,7 @@ export default function VerifierShell({ children }: VerifierShellProps) {
       setName(savedName);
 
       try {
-        const meRes = await authFetch(`${API_BASE.auth}/me`, { cache: 'no-store' });
+        const meRes = await authFetch(`${API_BASE.auth}/auth/me`, { cache: 'no-store' });
         if (meRes.ok) {
           const me = await meRes.json();
           if (typeof me?.name === 'string' && me.name.trim()) {
@@ -95,7 +92,6 @@ export default function VerifierShell({ children }: VerifierShellProps) {
     if (exact) return exact;
     if (pathname.startsWith('/verifier/dashboard')) return 'Dashboard';
     if (pathname.startsWith('/verifier/queue')) return 'Queue';
-    if (pathname.startsWith('/verifier/history')) return 'History';
     return 'Verifier';
   }, [pathname]);
 

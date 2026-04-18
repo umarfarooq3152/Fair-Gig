@@ -35,6 +35,8 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
       return;
     }
 
+    setReady(false);
+
     const token = typeof window !== 'undefined' ? localStorage.getItem('fairgig_access_token') : '';
     if (!token) {
       router.replace('/login');
@@ -72,6 +74,14 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
 
     setReady(true);
   }, [isPublic, pathname, router, usesDedicatedLayout]);
+
+  if (!isPublic && !ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-500">
+        Loading…
+      </div>
+    );
+  }
 
   if (isPublic) {
     return (
