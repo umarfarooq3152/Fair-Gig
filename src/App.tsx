@@ -3,6 +3,7 @@ import AuthScreen from './features/auth/AuthScreen.tsx';
 import WorkerDashboard from './features/dashboard/WorkerDashboard.tsx';
 import WorkerEarnings from './features/earnings/WorkerEarnings.tsx';
 import CommunityBoard from './features/grievance/CommunityBoard.tsx';
+import AdvocateAnalyticsDashboard from './features/advocate/AdvocateAnalyticsDashboard.tsx';
 import AdvocateQueue from './features/grievance/AdvocateQueue.tsx';
 import VerifierQueue from './features/verifier/VerifierQueue.tsx';
 import AnomalyInsights from './features/anomaly/AnomalyInsights.tsx';
@@ -37,7 +38,7 @@ export default function App() {
         setActiveSection('verifier');
       }
       if (payload.role === 'advocate') {
-        setActiveSection('community');
+        setActiveSection('analytics');
       }
     } catch {
       setUser(null);
@@ -113,6 +114,9 @@ export default function App() {
 
           {user.role === 'verifier' && <VerifierQueue verifierId={userId} />}
 
+          {user.role === 'advocate' && activeSection === 'analytics' && (
+            <AdvocateAnalyticsDashboard token={token} />
+          )}
           {user.role === 'advocate' && activeSection === 'community' && (
             <CommunityBoard role="advocate" token={token} />
           )}

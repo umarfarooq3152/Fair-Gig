@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { EChartsOption } from 'echarts';
+import { Award, Download, FileText } from 'lucide-react';
 import { API_BASE, authFetch } from '@/lib/api';
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), {
@@ -417,6 +418,49 @@ export default function WorkerDashboardPage() {
           <div>
             <h3 className="font-bold text-slate-800">Worker Profile</h3>
             <p className="text-xs text-slate-500 capitalize">{context.zone} &bull; {context.category.replace(/_/g, ' ')}</p>
+          </div>
+        </div>
+
+        {/* Premium Certificate Card */}
+        <div className="bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-50 rounded-xl p-5 shadow-md border-2 border-amber-200 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-20 h-20 bg-amber-200 rounded-full blur-2xl opacity-30"></div>
+          <div className="absolute bottom-0 left-0 w-16 h-16 bg-orange-200 rounded-full blur-2xl opacity-20"></div>
+          
+          <div className="relative z-10">
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-full bg-amber-500 flex items-center justify-center shadow-lg">
+                  <Award className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-amber-900">Income Certificate</h3>
+                  <p className="text-xs text-amber-700">Verified Earnings</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white bg-opacity-60 rounded-lg p-3 mb-3 border border-amber-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-amber-700 font-medium">Total Verified Earnings</p>
+                  <p className="text-lg font-bold text-amber-900">PKR {kpis.net.toLocaleString()}</p>
+                </div>
+                <FileText className="w-6 h-6 text-amber-500" />
+              </div>
+              <p className="text-xs text-amber-600 mt-2 font-medium">{kpis.verified} verified shifts</p>
+            </div>
+
+            <button 
+              onClick={() => {
+                window.location.href = '/certificate';
+              }}
+              className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl hover:from-amber-600 hover:to-orange-600 transition-all flex items-center justify-center gap-2 text-sm group"
+            >
+              <Download className="w-4 h-4 group-hover:translate-y-0.5 transition" />
+              Generate & Print Certificate
+            </button>
+
+            <p className="text-xs text-amber-700 mt-2 text-center">Download your official income certificate for loans, visa, or verification.</p>
           </div>
         </div>
 

@@ -12,6 +12,15 @@ FairGig is an end-to-end gig worker income transparency and rights platform with
 - Analytics Service (FastAPI): `8005`
 - Certificate Renderer (Node.js): `8006`
 
+## Two frontends (important)
+
+| UI | Location | Default URL | Advocate “new” dashboard |
+|----|----------|---------------|---------------------------|
+| **Primary (Next.js)** | `frontend/` | **`http://localhost:3000`** | **`/advocate/analytics`** |
+| Legacy (Vite SPA) | `src/` + `index.html` | **`http://localhost:5173`** (see `vite.config.ts`) | **Analytics panel** (first sidebar item); data matches Next |
+
+If you run **`vite` on port 3000** or anything else binds 3000 before `dev-services.ts`, the orchestrator **skips** starting Next — you may only see the old shell. Use **`npm run dev:frontend`** for the Next app, or **`npm run dev:vite`** for the Vite shell on 5173.
+
 ## Monorepo Structure
 
 - `frontend/`
@@ -63,9 +72,17 @@ FairGig is an end-to-end gig worker income transparency and rights platform with
 - Start: `cd certificate-renderer && npm start`
 
 ### Frontend (3000)
-- Install: `cd frontend && npm install`
+- Install: `cd frontend && npm install` (required so `next` is available; the dev script uses `npx next`.)
 - Env: `cp .env.example .env.local`
-- Start: `npm run dev`
+- Start: `npm run dev` from `frontend/`, or from repo root: `npm run dev:frontend`
+
+### Orchestrator (`npm run dev` from repo root)
+- Starts FastAPI with **`resolvePython()`**: `PYTHON_CMD` from `.env`, else `./venv/Scripts/python.exe` (Windows) or `./venv/bin/python3`, else `python` / `python3`. **Never uses `py -3`.**
+- Install deps into **that** interpreter or the venv, or you get `No module named uvicorn`:
+  - `python -m venv venv`
+  - Windows: `.\venv\Scripts\pip install -r auth-service\requirements.txt -r anomaly-service\requirements.txt -r analytics-service\requirements.txt`
+- Starts **Next** with `cwd` = `frontend/` and `npm run dev` (so `next` resolves from `frontend/node_modules`). Run **`npm install --prefix frontend`** once.
+- **FairGig Workspace** (advocate/worker shell in `src/`): `npm run dev:vite` → port **5173**. Next on **3000** is the App Router marketing + role routes; both talk to the same REST APIs.
 
 ## Demo Story Checklist
 

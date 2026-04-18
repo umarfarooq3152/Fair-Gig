@@ -18,24 +18,25 @@ export const csvRequiredColumns = [
 ];
 
 const env = (import.meta as any).env || {};
+/** Prefer direct service URLs so dev works without a same-origin `/api` proxy. Optional `/api` second for proxied setups. */
 export const authBases = env.VITE_AUTH_BASE_URL
   ? [env.VITE_AUTH_BASE_URL]
-  : ['/api/auth', 'http://localhost:8001/auth'];
+  : ['http://localhost:8001/auth', '/api/auth'];
 export const earningsBases = env.VITE_EARNINGS_BASE_URL
   ? [env.VITE_EARNINGS_BASE_URL]
-  : ['/api/shifts', 'http://localhost:8002/shifts'];
+  : ['http://localhost:8002/shifts', '/api/shifts'];
 export const verifierBases = env.VITE_VERIFIER_BASE_URL
   ? [env.VITE_VERIFIER_BASE_URL]
-  : ['/api/verifier', 'http://localhost:8002/verifier'];
+  : ['http://localhost:8002/verifier', '/api/verifier'];
 export const grievanceBases = env.VITE_GRIEVANCE_BASE_URL
   ? [env.VITE_GRIEVANCE_BASE_URL]
   : ['http://localhost:8004/api', '/api'];
 export const anomalyBases = env.VITE_ANOMALY_BASE_URL
   ? [env.VITE_ANOMALY_BASE_URL]
-  : ['/api/anomaly', 'http://localhost:8003'];
+  : ['http://localhost:8003'];
 export const analyticsBases = env.VITE_ANALYTICS_BASE_URL
   ? [env.VITE_ANALYTICS_BASE_URL]
-  : ['/api/analytics', 'http://localhost:8005/analytics'];
+  : ['http://localhost:8005/analytics', '/api/analytics'];
 
 export const clusterTagOptions = [
   'payment_delay',

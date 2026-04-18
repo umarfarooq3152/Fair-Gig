@@ -33,6 +33,13 @@ export default function AppSidebar({ role, activeSection, setActiveSection, onLo
 
         {role === 'advocate' && (
           <>
+            <button
+              type="button"
+              className={`${base} ${activeSection === 'analytics' ? active : idle}`}
+              onClick={() => setActiveSection('analytics')}
+            >
+              Analytics panel
+            </button>
             <button type="button" className={`${base} ${activeSection === 'community' ? active : idle}`} onClick={() => setActiveSection('community')}>Community Board</button>
             <button type="button" className={`${base} ${activeSection === 'advocate' ? active : idle}`} onClick={() => setActiveSection('advocate')}>Moderation Queue</button>
           </>

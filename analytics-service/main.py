@@ -34,6 +34,141 @@ def health():
     return {"status": "ok", "service": "analytics-service", "port": 8005}
 
 
+@app.get("/analytics/advocate-summary")
+def advocate_summary():
+    """KPI strip for the advocate dashboard — single round-trip from live DB."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*)::int AS total_workers
+                FROM auth.users
+                WHERE role = 'worker'
+                """
+            )
+            total_workers = int(cur.fetchone()["total_workers"] or 0)
+
+            cur.execute(
+                """
+                SELECT
+                  COUNT(*) FILTER (
+                    WHERE created_at >= date_trunc('month', NOW())
+                  )::int AS new_this_month,
+                  COUNT(*) FILTER (
+                    WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month')
+                      AND created_at < date_trunc('month', NOW())
+                  )::int AS new_last_month
+                FROM auth.users
+                WHERE role = 'worker'
+                """
+            )
+            row_reg = cur.fetchone()
+            new_this = int(row_reg["new_this_month"] or 0)
+            new_last = int(row_reg["new_last_month"] or 0)
+            if new_last > 0:
+                registration_mom_pct = round((new_this - new_last) / new_last * 100, 1)
+            elif new_this > 0:
+                registration_mom_pct = 100.0
+            else:
+                registration_mom_pct = 0.0
+
+            cur.execute(
+                """
+                SELECT
+                  ROUND((
+                    SELECT SUM(platform_deductions) / NULLIF(SUM(gross_earned), 0)
+                    FROM earnings.shifts
+                    WHERE gross_earned > 0
+                      AND date_trunc('month', shift_date) = date_trunc('month', NOW())
+                  )::numeric, 4) AS avg_commission_this_month,
+                  ROUND((
+                    SELECT SUM(platform_deductions) / NULLIF(SUM(gross_earned), 0)
+                    FROM earnings.shifts
+                    WHERE gross_earned > 0
+                      AND date_trunc('month', shift_date) = date_trunc('month', NOW() - INTERVAL '1 month')
+                  )::numeric, 4) AS avg_commission_last_month
+                """
+            )
+            row_c = cur.fetchone()
+            c_this = float(row_c["avg_commission_this_month"] or 0)
+            c_last = float(row_c["avg_commission_last_month"] or 0)
+            if c_last > 0:
+                commission_mom_delta_pp = round((c_this - c_last) * 100, 2)
+            else:
+                commission_mom_delta_pp = 0.0
+
+            cur.execute(
+                """
+                SELECT
+                  COUNT(*) FILTER (WHERE status IN ('open', 'escalated'))::int AS active_complaints,
+                  COUNT(*) FILTER (WHERE status = 'escalated')::int AS escalated_complaints
+                FROM grievance.complaints
+                """
+            )
+            row_g = cur.fetchone()
+            active_complaints = int(row_g["active_complaints"] or 0)
+            escalated_complaints = int(row_g["escalated_complaints"] or 0)
+
+            cur.execute(
+                """
+                SELECT COUNT(*)::int AS n
+                FROM (
+                  SELECT u.id
+                  FROM auth.users u
+                  JOIN earnings.shifts s ON s.worker_id = u.id
+                  WHERE u.role = 'worker'
+                  GROUP BY u.id, u.name, u.city_zone, u.category
+                  HAVING SUM(CASE
+                      WHEN date_trunc('month', s.shift_date) = date_trunc('month', NOW() - INTERVAL '1 month')
+                      THEN s.net_received ELSE 0 END) > 0
+                     AND SUM(CASE
+                      WHEN date_trunc('month', s.shift_date) = date_trunc('month', NOW())
+                      THEN s.net_received ELSE 0 END)
+                     < SUM(CASE
+                      WHEN date_trunc('month', s.shift_date) = date_trunc('month', NOW() - INTERVAL '1 month')
+                      THEN s.net_received ELSE 0 END) * 0.8
+                ) flagged
+                """
+            )
+            vulnerability_count = int(cur.fetchone()["n"] or 0)
+
+    return {
+        "total_workers": total_workers,
+        "new_workers_this_month": new_this,
+        "new_workers_last_month": new_last,
+        "registration_mom_pct": registration_mom_pct,
+        "avg_commission_rate": round(c_this * 100, 2),
+        "avg_commission_rate_prev_month_pct": round(c_last * 100, 2),
+        "commission_mom_delta_pp": commission_mom_delta_pp,
+        "active_complaints": active_complaints,
+        "escalated_complaints": escalated_complaints,
+        "vulnerability_count": vulnerability_count,
+    }
+
+
+@app.get("/analytics/income-by-zone-category")
+def income_by_zone_category():
+    """Net income (PKR) in the last 30 days, grouped by worker city zone and gig category."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  u.city_zone AS zone,
+                  u.category::text AS category,
+                  ROUND(COALESCE(SUM(s.net_received), 0)::numeric, 0) AS total_net
+                FROM auth.users u
+                JOIN earnings.shifts s ON s.worker_id = u.id
+                WHERE u.role = 'worker'
+                  AND s.shift_date >= NOW() - INTERVAL '30 days'
+                GROUP BY u.city_zone, u.category
+                ORDER BY u.city_zone, u.category
+                """
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 @app.get("/analytics/commission-trends")
 def commission_trends():
     with get_conn() as conn:

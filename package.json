@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tsx dev-services.ts",
     "dev:services": "tsx dev-services.ts",
+    "install:frontend": "npm install --prefix frontend",
     "dev:frontend": "npm --prefix frontend run dev",
+    "dev:vite": "vite --port 5173",
     "build": "npm --prefix frontend run build",
     "preview": "npm --prefix frontend run start",
     "clean": "rm -rf dist",
