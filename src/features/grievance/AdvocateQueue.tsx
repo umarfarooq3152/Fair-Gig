@@ -7,6 +7,20 @@ type Props = {
   token: string;
 };
 
+function statusChipClass(status: ComplaintItem['status']) {
+  if (status === 'resolved') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+  if (status === 'escalated') return 'bg-amber-100 text-amber-800 border-amber-200';
+  if (status === 'rejected') return 'bg-rose-100 text-rose-800 border-rose-200';
+  return 'bg-slate-100 text-slate-700 border-slate-200';
+}
+
+function initials(name: string) {
+  const tokens = name.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return 'FG';
+  if (tokens.length === 1) return tokens[0].slice(0, 2).toUpperCase();
+  return `${tokens[0][0]}${tokens[1][0]}`.toUpperCase();
+}
+
 export default function AdvocateQueue({ token }: Props) {
   const [items, setItems] = useState<ComplaintItem[]>([]);
   const [clusters, setClusters] = useState<ComplaintCluster[]>([]);
@@ -16,15 +30,25 @@ export default function AdvocateQueue({ token }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const [platformFilter, setPlatformFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | ComplaintItem['status']>('all');
+  const [search, setSearch] = useState('');
+  const [focusClusterId, setFocusClusterId] = useState<'all' | '__unclustered__' | string>('all');
+
   const [clusterName, setClusterName] = useState('Systemic Issue Cluster');
   const [clusterTag, setClusterTag] = useState('payment_delay');
   const [existingClusterId, setExistingClusterId] = useState('');
   const [bulkTagsInput, setBulkTagsInput] = useState('');
 
+  const [showClusterModal, setShowClusterModal] = useState(false);
+  const [clusterFilter, setClusterFilter] = useState('');
+
   const selectedItems = useMemo(() => items.filter((item) => selectedIds.includes(item.id)), [items, selectedIds]);
   const selectedClusterId = useMemo(() => {
-    const clusterIds = Array.from(new Set(selectedItems.map((item) => item.cluster_id).filter(Boolean))) as string[];
-    return clusterIds.length === 1 ? clusterIds[0] : '';
+    const uniqueClusterIds = Array.from(new Set(selectedItems.map((item) => item.cluster_id).filter(Boolean))) as string[];
+    return uniqueClusterIds.length === 1 ? uniqueClusterIds[0] : '';
   }, [selectedItems]);
 
   async function loadQueue() {
@@ -34,10 +58,12 @@ export default function AdvocateQueue({ token }: Props) {
       headers: { Authorization: `Bearer ${token}` },
     });
     setLoading(false);
+
     if (!response.ok) {
       setError(getErrorMessage(payload, 'Could not load complaints'));
       return;
     }
+
     setItems(Array.isArray(payload) ? payload : []);
   }
 
@@ -45,6 +71,7 @@ export default function AdvocateQueue({ token }: Props) {
     const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/clusters?limit=100', {
       headers: { Authorization: `Bearer ${token}` },
     });
+
     if (response.ok) {
       setClusters(Array.isArray(payload) ? payload : []);
     }
@@ -54,6 +81,7 @@ export default function AdvocateQueue({ token }: Props) {
     const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/alerts/spikes?window_hours=3&min_count=5', {
       headers: { Authorization: `Bearer ${token}` },
     });
+
     if (response.ok) {
       setSpikes(Array.isArray(payload?.items) ? payload.items : []);
     }
@@ -65,6 +93,10 @@ export default function AdvocateQueue({ token }: Props) {
     void loadSpikes();
   }, []);
 
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [focusClusterId, platformFilter, categoryFilter, statusFilter, search]);
+
   async function withBusy(task: () => Promise<void>) {
     setBusy(true);
     setError('');
@@ -74,6 +106,74 @@ export default function AdvocateQueue({ token }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function toggleSelection(id: string) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
+  }
+
+  const filteredClusters = useMemo(() => {
+    const needle = clusterFilter.trim().toLowerCase();
+    if (!needle) return clusters;
+
+    return clusters.filter((cluster) => {
+      const name = String(cluster.name || '').toLowerCase();
+      const platform = String(cluster.platform || '').toLowerCase();
+      const tag = String(cluster.primary_tag || '').toLowerCase();
+      return name.includes(needle) || platform.includes(needle) || tag.includes(needle);
+    });
+  }, [clusterFilter, clusters]);
+
+  const platformOptions = useMemo(() => Array.from(new Set(items.map((item) => item.platform))).sort((a, b) => a.localeCompare(b)), [items]);
+  const categoryOptions = useMemo(() => Array.from(new Set(items.map((item) => item.category))).sort((a, b) => a.localeCompare(b)), [items]);
+
+  const visibleItems = useMemo(() => {
+    let scoped = items;
+
+    if (focusClusterId === '__unclustered__') {
+      scoped = scoped.filter((item) => !item.cluster_id);
+    } else if (focusClusterId !== 'all') {
+      scoped = scoped.filter((item) => item.cluster_id === focusClusterId);
+    }
+
+    if (platformFilter !== 'all') scoped = scoped.filter((item) => item.platform === platformFilter);
+    if (categoryFilter !== 'all') scoped = scoped.filter((item) => item.category === categoryFilter);
+    if (statusFilter !== 'all') scoped = scoped.filter((item) => item.status === statusFilter);
+
+    const needle = search.trim().toLowerCase();
+    if (needle) {
+      scoped = scoped.filter((item) => {
+        const desc = String(item.description || '').toLowerCase();
+        const worker = String(item.worker_name || item.worker_id || '').toLowerCase();
+        const tags = (item.tags || []).join(',').toLowerCase();
+        return desc.includes(needle) || worker.includes(needle) || tags.includes(needle);
+      });
+    }
+
+    return scoped.sort((a, b) => {
+      const left = new Date(a.created_at || 0).getTime();
+      const right = new Date(b.created_at || 0).getTime();
+      return right - left;
+    });
+  }, [items, focusClusterId, platformFilter, categoryFilter, statusFilter, search]);
+
+  const grouped = useMemo(() => {
+    const out: Record<string, Record<string, ComplaintItem[]>> = {};
+    for (const item of visibleItems) {
+      if (!out[item.platform]) out[item.platform] = {};
+      if (!out[item.platform][item.category]) out[item.platform][item.category] = [];
+      out[item.platform][item.category].push(item);
+    }
+    return out;
+  }, [visibleItems]);
+
+  const visibleSelectedCount = useMemo(
+    () => visibleItems.filter((item) => selectedIds.includes(item.id)).length,
+    [visibleItems, selectedIds],
+  );
+
+  function selectAllVisible() {
+    setSelectedIds(visibleItems.map((item) => item.id));
   }
 
   async function assignTags() {
@@ -93,6 +193,7 @@ export default function AdvocateQueue({ token }: Props) {
         setError(getErrorMessage(payload, 'Could not assign tags'));
         return;
       }
+
       setItems((prev) => prev.map((item) => (selectedIds.includes(item.id) ? { ...item, tags } : item)));
       setSelectedIds([]);
       setSuccess('Tags assigned');
@@ -100,8 +201,8 @@ export default function AdvocateQueue({ token }: Props) {
   }
 
   async function createCluster() {
-    if (selectedIds.length < 2) {
-      setError('Select at least two complaints');
+    if (selectedIds.length < 1) {
+      setError('Select at least one complaint');
       return;
     }
 
@@ -116,38 +217,45 @@ export default function AdvocateQueue({ token }: Props) {
           platform: selectedItems[0]?.platform || null,
         }),
       });
+
       if (!response.ok) {
         setError(getErrorMessage(payload, 'Could not create cluster'));
         return;
       }
+
       const linkedIds: string[] = payload?.linked_complaint_ids || [];
       const clusterId = payload?.cluster?.id;
       setItems((prev) => prev.map((item) => (linkedIds.includes(item.id) ? { ...item, cluster_id: clusterId } : item)));
       setSelectedIds([]);
+      setShowClusterModal(false);
       await loadClusters();
       setSuccess('Cluster created');
     });
   }
 
-  async function addToExistingCluster() {
-    if (!existingClusterId || selectedIds.length < 1) {
+  async function addToExistingCluster(targetClusterId?: string) {
+    const clusterId = targetClusterId || existingClusterId;
+    if (!clusterId || selectedIds.length < 1) {
       setError('Select cluster and complaints first');
       return;
     }
 
     await withBusy(async () => {
-      const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/cluster/${existingClusterId}/add`, {
+      const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/cluster/${clusterId}/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ complaint_ids: selectedIds }),
       });
+
       if (!response.ok) {
         setError(getErrorMessage(payload, 'Could not add to cluster'));
         return;
       }
+
       const linkedIds: string[] = payload?.linked_complaint_ids || [];
-      setItems((prev) => prev.map((item) => (linkedIds.includes(item.id) ? { ...item, cluster_id: existingClusterId } : item)));
+      setItems((prev) => prev.map((item) => (linkedIds.includes(item.id) ? { ...item, cluster_id: clusterId } : item)));
       setSelectedIds([]);
+      setShowClusterModal(false);
       await loadClusters();
       setSuccess('Added to cluster');
     });
@@ -166,10 +274,12 @@ export default function AdvocateQueue({ token }: Props) {
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ status: nextStatus }),
         });
+
         if (!response.ok) {
           setError(getErrorMessage(payload, 'Could not cascade status'));
           return;
         }
+
         setItems((prev) => prev.map((item) => (item.cluster_id === selectedClusterId ? { ...item, status: nextStatus } : item)));
       } else {
         const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/bulk/status', {
@@ -177,12 +287,15 @@ export default function AdvocateQueue({ token }: Props) {
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ complaint_ids: selectedIds, status: nextStatus }),
         });
+
         if (!response.ok) {
           setError(getErrorMessage(payload, 'Could not update status'));
           return;
         }
+
         setItems((prev) => prev.map((item) => (selectedIds.includes(item.id) ? { ...item, status: nextStatus } : item)));
       }
+
       setSelectedIds([]);
       setSuccess(`Marked ${nextStatus}`);
     });
@@ -194,84 +307,313 @@ export default function AdvocateQueue({ token }: Props) {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
       });
+
       if (!response.ok) {
         setError(getErrorMessage(payload, 'Could not un-cluster complaint'));
         return;
       }
+
       setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...payload } : item)));
       await loadClusters();
       setSuccess('Complaint moved back to open');
     });
   }
 
+  async function updateClusterStatus(clusterId: string, nextStatus: 'escalated' | 'resolved') {
+    await withBusy(async () => {
+      const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/cluster/${clusterId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+
+      if (!response.ok) {
+        setError(getErrorMessage(payload, 'Could not update cluster status'));
+        return;
+      }
+
+      setItems((prev) => prev.map((item) => (item.cluster_id === clusterId ? { ...item, status: nextStatus } : item)));
+      setSuccess(`Cluster marked ${nextStatus}`);
+    });
+  }
+
+  const platformEntries = Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
+
   return (
     <section className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[1fr,280px]">
-        <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">Advocate Moderation Queue</h2>
-            <button className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold" onClick={() => { void loadQueue(); void loadSpikes(); void loadClusters(); }}>Refresh Queue</button>
-          </div>
-          {error && <p className="text-sm font-medium text-red-600">{error}</p>}
-          {success && <p className="text-sm font-medium text-emerald-700">{success}</p>}
-          {loading ? <p className="text-sm text-slate-600">Loading...</p> : (
-            <div className="overflow-hidden rounded-lg border border-slate-200">
-              <div className="grid grid-cols-[32px,150px,120px,1fr,130px,140px] gap-2 border-b border-slate-200 bg-slate-50 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                <label className="flex items-center justify-center"><input type="checkbox" checked={items.length > 0 && selectedIds.length === items.length} onChange={(e) => setSelectedIds(e.target.checked ? items.map((item) => item.id) : [])} /></label>
-                <span>Time</span><span>Platform</span><span>Preview</span><span>Status</span><span>Cluster</span>
-              </div>
-              <div className="max-h-[65vh] overflow-auto">
-                {items.map((item) => (
-                  <div key={item.id} className="grid grid-cols-[32px,150px,120px,1fr,130px,140px] gap-2 border-b border-slate-100 px-2 py-2 text-xs text-slate-700">
-                    <label className="flex items-start justify-center pt-1"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((prev) => (prev.includes(item.id) ? prev.filter((v) => v !== item.id) : [...prev, item.id]))} /></label>
-                    <div><p>{item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</p><p className="truncate text-[11px] text-slate-500">{item.worker_name || item.worker_id || 'Unknown'}</p></div>
-                    <div><p className="font-semibold text-slate-800">{item.platform}</p><p className="text-[11px] text-slate-500">{item.category}</p></div>
-                    <div className="space-y-1"><p className="truncate font-semibold text-slate-900">{item.description.slice(0, 90)}</p><p className="truncate text-[11px] text-slate-500">{(item.tags || []).join(', ') || 'No tags'}</p></div>
-                    <div><span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${item.status === 'resolved' ? 'bg-emerald-100 text-emerald-800' : item.status === 'escalated' ? 'bg-amber-100 text-amber-800' : item.status === 'rejected' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-700'}`}>{item.status}</span></div>
-                    <div className="space-y-1"><p className="truncate text-[11px] text-slate-500">{item.cluster_id || 'Unclustered'}</p>{item.cluster_id && <button className="rounded border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700" onClick={() => void uncluster(item.id)}>Remove</button>}</div>
-                  </div>
+      <div className="grid auto-rows-[minmax(120px,auto)] gap-4 xl:grid-cols-12">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Queue Filters</h3>
+          <div className="mt-3 grid gap-2">
+            <input
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              placeholder="Search description / worker / tags"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className="grid gap-2 md:grid-cols-2">
+              <select className="rounded border border-slate-300 px-2 py-2 text-xs" value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)}>
+                <option value="all">All Platforms</option>
+                {platformOptions.map((platform) => (
+                  <option key={platform} value={platform}>{platform}</option>
                 ))}
+              </select>
+              <select className="rounded border border-slate-300 px-2 py-2 text-xs" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option value="all">All Categories</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <select className="rounded border border-slate-300 px-2 py-2 text-xs" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'all' | ComplaintItem['status'])}>
+                <option value="all">All Status</option>
+                <option value="open">open</option>
+                <option value="escalated">escalated</option>
+                <option value="resolved">resolved</option>
+                <option value="rejected">rejected</option>
+              </select>
+              <select className="rounded border border-slate-300 px-2 py-2 text-xs" value={focusClusterId} onChange={(e) => setFocusClusterId(e.target.value)}>
+                <option value="all">All Clusters</option>
+                <option value="__unclustered__">Unclustered Only</option>
+                {clusters.map((cluster) => (
+                  <option key={cluster.id} value={cluster.id}>{cluster.name} ({cluster.complaint_count || 0})</option>
+                ))}
+              </select>
+            </div>
+            <button type="button" className="rounded border border-slate-300 bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-700" onClick={() => {
+              setSearch('');
+              setPlatformFilter('all');
+              setCategoryFilter('all');
+              setStatusFilter('all');
+              setFocusClusterId('all');
+            }}>
+              Reset Filters
+            </button>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-8">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Selection & Actions</h3>
+            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+              {selectedIds.length} selected / {visibleItems.length} visible
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">Tags</p>
+              <input className="mb-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Assign tags (comma-separated)" value={bulkTagsInput} onChange={(e) => setBulkTagsInput(e.target.value)} />
+              <button className="w-full rounded bg-slate-900 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void assignTags()}>Assign Tags</button>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">Status</p>
+              <div className="grid gap-2">
+                <button className="rounded bg-amber-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void updateStatus('escalated')}>Mark Escalated</button>
+                <button className="rounded bg-emerald-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void updateStatus('resolved')}>Approve (Resolve)</button>
               </div>
             </div>
-          )}
-        </div>
 
-        <aside className="space-y-3">
-          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900">Spike Alert (3h)</h3>
-            <div className="mt-2 space-y-2">
-              {spikes.length === 0 ? <p className="text-xs text-slate-500">No major spikes detected.</p> : spikes.slice(0, 8).map((spike) => (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">Cluster & Selection</p>
+              <div className="grid gap-2">
+                <button className="rounded bg-sky-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => setShowClusterModal(true)}>Add / Create Cluster</button>
+                <button className="rounded bg-indigo-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || visibleItems.length < 1} onClick={selectAllVisible}>Select All Visible</button>
+                <button className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => setSelectedIds([])}>Clear Selection</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Moderation Queue</h3>
+            <button className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold" onClick={() => { void loadQueue(); void loadSpikes(); void loadClusters(); }}>Refresh Queue</button>
+          </div>
+
+          {error && <p className="mb-2 text-sm font-medium text-red-600">{error}</p>}
+          {success && <p className="mb-2 text-sm font-medium text-emerald-700">{success}</p>}
+          {loading && <p className="text-sm text-slate-600">Loading complaints...</p>}
+
+          {!loading && visibleItems.length === 0 && (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-600">
+              No complaints match current filters.
+            </p>
+          )}
+
+          <div className="space-y-4">
+            {platformEntries.map(([platform, byCategory]) => {
+              const categoryEntries = Object.entries(byCategory).sort(([a], [b]) => a.localeCompare(b));
+              return (
+                <div key={platform} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-slate-900">{platform}</h4>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                      {categoryEntries.reduce((acc, [, arr]) => acc + arr.length, 0)} complaints
+                    </span>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {categoryEntries.map(([category, list]) => (
+                      <div key={`${platform}-${category}`} className="rounded-lg border border-slate-200 bg-white p-2">
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{category} ({list.length})</p>
+                        <div className="space-y-2">
+                          {list.map((item) => {
+                            const displayName = item.is_anonymous ? 'Anonymous Worker' : (item.worker_name || `Worker ${String(item.worker_id || '').slice(0, 8)}`);
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => toggleSelection(item.id)}
+                                className={`w-full rounded-lg border p-2 text-left transition ${selectedIds.includes(item.id) ? 'border-slate-900 bg-slate-100 ring-1 ring-slate-900/30' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-indigo-500 text-[11px] font-bold text-white">
+                                      {item.is_anonymous ? 'AN' : initials(displayName)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate text-xs font-semibold text-slate-900">{displayName}</p>
+                                      <p className="text-[11px] text-slate-500">{item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown time'}</p>
+                                    </div>
+                                  </div>
+                                  {item.cluster_id && (
+                                    <button
+                                      type="button"
+                                      className="rounded border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void uncluster(item.id);
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+
+                                <p className="mt-2 line-clamp-3 text-xs text-slate-700">{item.description}</p>
+
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold capitalize ${statusChipClass(item.status)}`}>
+                                    {item.status}
+                                  </span>
+                                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.cluster_id ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-100 text-slate-600'}`}>
+                                    {item.cluster_id ? `Cluster ${item.cluster_id.slice(0, 6)}` : 'Open (Unclustered)'}
+                                  </span>
+                                  {(item.tags || []).slice(0, 2).map((tag) => (
+                                    <span key={`${item.id}-${tag}`} className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold text-cyan-700">#{tag}</span>
+                                  ))}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Clusters</h3>
+          <select className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" value={existingClusterId} onChange={(e) => setExistingClusterId(e.target.value)}>
+            <option value="">Select cluster</option>
+            {clusters.map((cluster) => (
+              <option key={cluster.id} value={cluster.id}>{cluster.name} ({cluster.complaint_count || 0})</option>
+            ))}
+          </select>
+
+          {existingClusterId && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button type="button" className="rounded bg-amber-500 px-2 py-1.5 text-xs font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(existingClusterId, 'escalated')}>Escalate</button>
+              <button type="button" className="rounded bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(existingClusterId, 'resolved')}>Resolve</button>
+            </div>
+          )}
+
+          <div className="mt-3 max-h-[360px] space-y-2 overflow-auto">
+            <button type="button" className={`w-full rounded border px-2 py-1.5 text-left text-[11px] font-semibold ${focusClusterId === '__unclustered__' ? 'border-slate-900 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-700'}`} onClick={() => setFocusClusterId('__unclustered__')}>Focus Unclustered</button>
+            {clusters.map((cluster) => (
+              <div key={cluster.id} className="rounded border border-slate-200 bg-slate-50 p-2">
+                <p className="text-xs font-semibold text-slate-800">{cluster.name}</p>
+                <p className="text-[11px] text-slate-500">{cluster.primary_tag || 'untagged'} · {cluster.platform || 'mixed'} · {cluster.complaint_count || 0}</p>
+                <div className="mt-2 flex gap-2">
+                  <button type="button" className={`rounded px-2 py-1 text-[11px] font-semibold ${focusClusterId === cluster.id ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-800'}`} onClick={() => setFocusClusterId(cluster.id)}>{focusClusterId === cluster.id ? 'Focused' : 'Focus'}</button>
+                  <button type="button" className="rounded bg-amber-500 px-2 py-1 text-[11px] font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(cluster.id, 'escalated')}>Escalate</button>
+                  <button type="button" className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(cluster.id, 'resolved')}>Resolve</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Spike Alerts (3h)</h3>
+          <div className="mt-2 space-y-2">
+            {spikes.length === 0 ? (
+              <p className="text-xs text-slate-500">No major spikes detected.</p>
+            ) : (
+              spikes.slice(0, 8).map((spike) => (
                 <div key={`${spike.platform}-${spike.category}`} className="rounded border border-amber-200 bg-amber-50 p-2">
                   <p className="text-xs font-semibold text-amber-900">{spike.platform} · {spike.category}</p>
                   <p className="text-[11px] text-amber-800">{spike.count} complaints in last 3h</p>
                 </div>
-              ))}
-            </div>
-          </section>
-          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900">Existing Clusters</h3>
-            <select className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" value={existingClusterId} onChange={(e) => setExistingClusterId(e.target.value)}>
-              <option value="">Select cluster</option>
-              {clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name} ({cluster.complaint_count || 0})</option>)}
-            </select>
-          </section>
-        </aside>
-      </div>
-
-      {selectedIds.length > 0 && (
-        <section className="sticky bottom-3 z-20 rounded-xl border border-slate-900 bg-slate-950 p-3 shadow-xl">
-          <p className="mb-2 text-sm font-semibold text-white">{selectedIds.length} selected</p>
-          <div className="grid gap-2 md:grid-cols-6">
-            <input className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100" placeholder="Assign tags (comma-separated)" value={bulkTagsInput} onChange={(e) => setBulkTagsInput(e.target.value)} />
-            <button className="rounded bg-slate-100 px-2 py-2 text-xs font-semibold text-slate-900 disabled:opacity-60" disabled={busy} onClick={() => void assignTags()}>Assign Tags</button>
-            <input className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100" placeholder="New cluster name" value={clusterName} onChange={(e) => setClusterName(e.target.value)} />
-            <input className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs text-slate-100" placeholder="Primary tag" value={clusterTag} onChange={(e) => setClusterTag(e.target.value)} />
-            <button className="rounded bg-sky-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy} onClick={() => void createCluster()}>Create Cluster</button>
-            <button className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy} onClick={() => void addToExistingCluster()}>Add To Existing</button>
-            <button className="rounded bg-amber-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy} onClick={() => void updateStatus('escalated')}>Mark Escalated</button>
-            <button className="rounded bg-emerald-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy} onClick={() => void updateStatus('resolved')}>Mark Resolved</button>
+              ))
+            )}
           </div>
         </section>
+      </div>
+
+      {showClusterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900">Cluster Actions ({selectedIds.length} selected)</h3>
+              <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600" onClick={() => setShowClusterModal(false)}>Close</button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <section className="rounded-xl border border-slate-200 p-3">
+                <h4 className="text-sm font-semibold text-slate-900">Add to Existing Cluster</h4>
+                <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Search cluster by name/platform/tag" value={clusterFilter} onChange={(e) => setClusterFilter(e.target.value)} />
+                <div className="mt-2 max-h-56 space-y-2 overflow-auto">
+                  {filteredClusters.length === 0 ? (
+                    <p className="text-xs text-slate-500">No clusters found.</p>
+                  ) : (
+                    filteredClusters.map((cluster) => (
+                      <button
+                        key={cluster.id}
+                        type="button"
+                        className={`w-full rounded border px-2 py-2 text-left text-xs ${existingClusterId === cluster.id ? 'border-slate-900 bg-slate-100' : 'border-slate-200 bg-white'}`}
+                        onClick={() => setExistingClusterId(cluster.id)}
+                      >
+                        <p className="font-semibold text-slate-900">{cluster.name}</p>
+                        <p className="text-[11px] text-slate-500">{cluster.primary_tag || 'untagged'} · {cluster.platform || 'mixed'} · {cluster.complaint_count || 0}</p>
+                      </button>
+                    ))
+                  )}
+                </div>
+                <button type="button" className="mt-3 w-full rounded bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={!existingClusterId || busy} onClick={() => void addToExistingCluster()}>
+                  Add Selected To Chosen Cluster
+                </button>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 p-3">
+                <h4 className="text-sm font-semibold text-slate-900">Create New Cluster</h4>
+                <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Cluster name" value={clusterName} onChange={(e) => setClusterName(e.target.value)} />
+                <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Primary tag" value={clusterTag} onChange={(e) => setClusterTag(e.target.value)} />
+                <p className="mt-2 text-[11px] text-slate-500">Create a new cluster from one or more selected complaints.</p>
+                <button type="button" className="mt-3 w-full rounded bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void createCluster()}>
+                  Create Cluster From Selected
+                </button>
+              </section>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

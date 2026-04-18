@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Income Certificate</title>
+  <style>
+    :root {
+      --primary: #0F172A;
+      --secondary: #475569;
+      --border: #E2E8F0;
+      --green: #16A34A;
+    }
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      color: var(--primary);
+      margin: 0;
+      padding: 0;
+      background-color: #F8FAFC;
+    }
+    .document-wrapper {
+      max-width: 210mm;
+      margin: 40px auto;
+      background: white;
+      padding: 20mm;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+      position: relative;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 2px solid var(--primary);
+      padding-bottom: 20px;
+      margin-bottom: 30px;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.5px;
+    }
+    .brand p {
+      margin: 5px 0 0;
+      color: var(--secondary);
+      font-size: 14px;
+    }
+    .meta {
+      text-align: right;
+    }
+    .meta p {
+      margin: 4px 0;
+      font-size: 13px;
+    }
+    .qr-container {
+      position: absolute;
+      top: 20mm;
+      right: 20mm;
+      text-align: center;
+    }
+    .qr-container img {
+      width: 100px;
+      height: 100px;
+    }
+    .qr-container p {
+      font-size: 10px;
+      color: var(--secondary);
+      margin-top: 4px;
+    }
+    .summary-box {
+      border: 1px solid var(--border);
+      padding: 20px;
+      margin-bottom: 30px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      background-color: #F8FAFC;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--secondary);
+      text-transform: uppercase;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+    }
+    .stat-value {
+      font-size: 24px;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+    .stat-value.net {
+      color: var(--green);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 40px;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    th {
+      font-weight: 600;
+      color: var(--secondary);
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+    .text-right {
+      text-align: right;
+    }
+    .footer {
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+      font-size: 12px;
+      color: var(--secondary);
+      text-align: center;
+    }
+    .print-btn {
+      display: block;
+      width: 200px;
+      margin: 0 auto 40px auto;
+      padding: 12px 20px;
+      background: var(--primary);
+      color: white;
+      text-align: center;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      border-radius: 6px;
+    }
+
+    /* CSS FOR PRINTER ONLY */
+    @media print {
+      body {
+        background-color: white;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .document-wrapper {
+        box-shadow: none;
+        margin: 0;
+        padding: 0;
+      }
+      .print-btn {
+        display: none !important;
+      }
+      .summary-box {
+        background-color: #F8FAFC !important;
+        border: 1px solid #E2E8F0 !important;
+      }
+      @page {
+        size: A4;
+        margin: 20mm;
+      }
+      tr {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <button class="print-btn" onclick="window.print()">Export to PDF (Print)</button>
+
+  <div class="document-wrapper">
+    <div class="header">
+      <div class="brand">
+        <h1>FairGig</h1>
+        <p>Gig Worker Income & Rights Platform</p>
+      </div>
+      <div class="meta" style="margin-right: 120px;">
+        <p><strong>OFFICIAL INCOME CERTIFICATE</strong></p>
+        <p>Issue Date: <%= issue_date %></p>
+        <p>Period: <%= from_date %> to <%= to_date %></p>
+        <p>Worker Ref: <%= worker_id.substring(0,8).toUpperCase() %></p>
+      </div>
+    </div>
+
+    <div class="qr-container">
+      <img src="<%= qrImageBase64 %>" alt="Verification QR Code">
+      <p>Scan to Verify</p>
+      <p style="font-size: 9px;"><%= verificationId %></p>
+    </div>
+
+    <div class="summary-box">
+      <div>
+        <div class="stat-label">Total Verified Net Income</div>
+        <div class="stat-value net">PKR <%= Number(grandTotalNet).toLocaleString('en-PK', {minimumFractionDigits: 2}) %></div>
+      </div>
+      <div>
+        <div class="stat-label">Gross Platform Earnings</div>
+        <div class="stat-value">PKR <%= Number(grandTotalGross).toLocaleString('en-PK', {minimumFractionDigits: 2}) %></div>
+      </div>
+      <div>
+        <div class="stat-label">Total Completed Shifts</div>
+        <div class="stat-value"><%= totalShifts %></div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Platform</th>
+          <th class="text-right">Shifts</th>
+          <th class="text-right">Hours</th>
+          <th class="text-right">Gross Earned</th>
+          <th class="text-right">Deductions</th>
+          <th class="text-right">Net Received</th>
+          <th class="text-right">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (platforms.length === 0) { %>
+          <tr>
+            <td colspan="7" style="text-align: center; padding: 30px;">No verified earnings found for this period.</td>
+          </tr>
+        <% } else { %>
+          <% platforms.forEach(p => { %>
+            <tr>
+              <td><strong><%= p.platform %></strong></td>
+              <td class="text-right"><%= p.total_shifts %></td>
+              <td class="text-right"><%= Number(p.total_hours).toFixed(1) %></td>
+              <td class="text-right"><%= Number(p.gross_earned).toLocaleString('en-PK', {minimumFractionDigits: 2}) %></td>
+              <td class="text-right" style="color: #EF4444;"><%= Number(p.deductions).toLocaleString('en-PK', {minimumFractionDigits: 2}) %></td>
+              <td class="text-right" style="font-weight: bold;"><%= Number(p.net_received).toLocaleString('en-PK', {minimumFractionDigits: 2}) %></td>
+              <td class="text-right" style="color: var(--green);">Verified</td>
+            </tr>
+          <% }); %>
+        <% } %>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <p>This document is generated by FairGig and asserts that the included earnings have been independently verified against official platform records.</p>
+      <p>Certificate Serial: <strong><%= verificationId %></strong></p>
+    </div>
+  </div>
+
+</body>
+</html>

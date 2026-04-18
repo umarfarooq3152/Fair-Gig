@@ -10,6 +10,7 @@ FairGig is an end-to-end gig worker income transparency and rights platform with
 - Anomaly Service (FastAPI): `8003`
 - Grievance Service (Node.js): `8004`
 - Analytics Service (FastAPI): `8005`
+- Certificate Renderer (Node.js): `8006`
 
 ## Monorepo Structure
 
@@ -19,6 +20,7 @@ FairGig is an end-to-end gig worker income transparency and rights platform with
 - `anomaly-service/`
 - `grievance-service/`
 - `analytics-service/`
+- `certificate-renderer/`
 - `.env.example`
 - `schema.sql`
 - `seed.ts`
@@ -55,6 +57,10 @@ FairGig is an end-to-end gig worker income transparency and rights platform with
 ### Analytics Service (8005)
 - Install: `pip install -r analytics-service/requirements.txt`
 - Start: `cd analytics-service && uvicorn main:app --port 8005 --reload`
+
+### Certificate Renderer (8006)
+- Install: `cd certificate-renderer && npm install`
+- Start: `cd certificate-renderer && npm start`
 
 ### Frontend (3000)
 - Install: `cd frontend && npm install`

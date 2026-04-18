@@ -250,7 +250,7 @@ app.get('/shifts', async (req, res) => {
       FROM earnings.shift_screenshots sc
       WHERE sc.shift_id = s.id
         AND sc.is_primary = TRUE
-      ORDER BY sc.created_at DESC
+      ORDER BY sc.uploaded_at DESC
       LIMIT 1
     ) ss ON TRUE
     WHERE ${where.join(' AND ')}

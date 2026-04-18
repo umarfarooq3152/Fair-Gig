@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { anomalyBases, earningsBases } from '../app/config';
+import { fetchWithFallback, getErrorMessage } from '../app/helpers';
 
 type Props = {
   workerId: string;
@@ -13,14 +15,45 @@ export default function AnomalyInsights({ workerId }: Props) {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('/api/anomaly/analyze', {
+      const { response: shiftsRes, payload: shiftsPayload } = await fetchWithFallback(
+        earningsBases,
+        `?worker_id=${encodeURIComponent(workerId)}`,
+      );
+      if (!shiftsRes.ok) {
+        setError(getErrorMessage(shiftsPayload, 'Could not load worker shifts for anomaly analysis'));
+        return;
+      }
+
+      const earnings = Array.isArray(shiftsPayload)
+        ? shiftsPayload
+            .map((s: any) => {
+              const rawDate = String(s?.shift_date || '').trim();
+              const shiftDate = rawDate.includes('T') ? rawDate.slice(0, 10) : rawDate;
+              const gross = Number(s?.gross_earned ?? 0);
+              const deductions = Number(s?.platform_deductions ?? 0);
+              const net = Number(s?.net_received ?? 0);
+              const hours = Number(s?.hours_worked ?? 0);
+
+              return {
+                shift_date: shiftDate,
+                platform: String(s?.platform || 'Other'),
+                gross_earned: Number.isFinite(gross) && gross >= 0 ? gross : 0,
+                platform_deductions: Number.isFinite(deductions) && deductions >= 0 ? deductions : 0,
+                net_received: Number.isFinite(net) && net >= 0 ? net : 0,
+                hours_worked: Number.isFinite(hours) && hours >= 0 ? hours : 0,
+              };
+            })
+            .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.shift_date))
+        : [];
+
+      const { response, payload } = await fetchWithFallback(anomalyBases, '/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worker_id: workerId }),
+        body: JSON.stringify({ worker_id: workerId, earnings }),
       });
-      const payload = await response.json();
+
       if (!response.ok) {
-        setError(payload?.detail || 'Failed to analyze anomalies');
+        setError(getErrorMessage(payload, 'Failed to analyze anomalies'));
         return;
       }
       setResult(payload);

@@ -1,0 +1,17 @@
+{
+    "name": "certificate-renderer",
+    "version": "1.0.0",
+    "description": "FairGig Certificate Renderer Microservice",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node index.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "ejs": "^3.1.10",
+        "express": "^4.19.2",
+        "qrcode": "^1.5.3"
+    }
+}

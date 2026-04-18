@@ -30,3 +30,6 @@ export const verifierBases = env.VITE_VERIFIER_BASE_URL
 export const grievanceBases = env.VITE_GRIEVANCE_BASE_URL
   ? [env.VITE_GRIEVANCE_BASE_URL]
   : ['http://localhost:8004/api', '/api'];
+export const anomalyBases = env.VITE_ANOMALY_BASE_URL
+  ? [env.VITE_ANOMALY_BASE_URL]
+  : ['/api/anomaly', 'http://localhost:8003'];

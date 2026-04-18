@@ -25,3 +25,5 @@
 | Analytics | GET | `/analytics/vulnerability-flags` | Workers with >20% MoM drop |
 | Analytics | GET | `/analytics/median/:category/:zone` | City median hourly rate |
 | Analytics | GET | `/analytics/top-complaints` | Top complaint categories (7 days) |
+| Certificate | GET | `/certificate` | Render HTML certificate for print |
+| Certificate | GET | `/verify/:id` | Render digitally verified proof of certificate |

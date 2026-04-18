@@ -42,7 +42,31 @@ export async function fetchWithFallback(
 }
 
 export function getErrorMessage(payload: any, fallback: string) {
-  return payload?.detail || payload?.message || fallback;
+  const detail = payload?.detail;
+  const message = payload?.message;
+
+  if (typeof detail === 'string' && detail.trim()) return detail;
+
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0];
+    if (typeof first === 'string') return first;
+    if (first && typeof first === 'object') {
+      const msg = (first as any).msg || (first as any).message;
+      const loc = Array.isArray((first as any).loc) ? (first as any).loc.join('.') : '';
+      if (msg && loc) return `${loc}: ${msg}`;
+      if (msg) return msg;
+    }
+    return fallback;
+  }
+
+  if (detail && typeof detail === 'object') {
+    const msg = (detail as any).msg || (detail as any).message;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+  }
+
+  if (typeof message === 'string' && message.trim()) return message;
+
+  return fallback;
 }
 
 export function getUnknownErrorMessage(error: unknown, fallback: string) {
