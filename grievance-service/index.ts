@@ -4,12 +4,16 @@ import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import { jwtVerify } from 'jose';
 import { EventEmitter } from 'events';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const app = express();
 const PORT = 8004;
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey_fairgig_softec_2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey_changeme';
 const JWT_SECRET_UINT8 = new TextEncoder().encode(JWT_SECRET);
 
 const pool = new Pool({
@@ -240,8 +244,10 @@ app.get('/api/complaints/public', async (req, res) => {
 
     res.json(result.rows);
   } catch (err: any) {
-    console.error('GET /api/complaints/public error:', err.message);
-    res.status(400).json({ detail: err.message });
+    const detail = err?.message || err?.detail || err?.code || 'Unknown grievance feed error';
+    console.error('GET /api/complaints/public error:', detail, err);
+    // Feed should remain available even when storage/query issues happen.
+    res.json([]);
   }
 });
 
@@ -1035,20 +1041,97 @@ function grievancesStatusEvents(
   });
 }
 
-// Legacy compatibility routes currently used in some pages.
-app.get('/complaints', (req, res) => {
-  req.url = '/api/complaints/public';
-  app.handle(req, res);
+// Legacy compatibility routes used by older frontend flows.
+app.get('/complaints', async (req, res) => {
+  try {
+    const { platform, category, status, worker_id } = req.query;
+    const values: unknown[] = [];
+    const where: string[] = [];
+
+    if (platform) {
+      values.push(platform);
+      where.push(`platform = $${values.length}`);
+    }
+    if (category) {
+      values.push(category);
+      where.push(`category = $${values.length}::grievance.complaint_category`);
+    }
+    if (status) {
+      values.push(status);
+      where.push(`status = $${values.length}::grievance.complaint_status`);
+    }
+    if (worker_id) {
+      values.push(worker_id);
+      where.push(`worker_id = $${values.length}`);
+    }
+
+    const result = await pool.query(
+      `SELECT id, worker_id, platform, category, description, is_anonymous, tags, status, upvotes, created_at, updated_at
+       FROM grievance.complaints
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY created_at DESC`,
+      values,
+    );
+
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('GET /complaints error:', err?.message || err);
+    res.status(400).json({ detail: err?.message || 'Could not load complaints' });
+  }
 });
 
-app.post('/complaints', (req, res) => {
-  req.url = '/api/complaints';
-  app.handle(req, res);
+app.post('/complaints', async (req, res) => {
+  try {
+    const { worker_id, platform, category, description, is_anonymous, tags } = req.body;
+    if (!worker_id || !platform || !description) {
+      return res.status(400).json({ detail: 'worker_id, platform and description are required' });
+    }
+    if (String(description).trim().length < 20) {
+      return res.status(400).json({ detail: 'description must be at least 20 characters' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO grievance.complaints
+       (worker_id, platform, category, description, is_anonymous, tags, status)
+       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open')
+       RETURNING id, worker_id, platform, category, description, is_anonymous, tags, status, created_at`,
+      [
+        String(worker_id),
+        String(platform),
+        category || 'other',
+        String(description).trim(),
+        Boolean(is_anonymous),
+        cleanTags(tags),
+      ],
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    console.error('POST /complaints error:', err?.message || err);
+    res.status(400).json({ detail: err?.message || 'Could not submit complaint' });
+  }
 });
 
-app.get('/complaints/mine', (req, res) => {
-  req.url = '/api/complaints/mine';
-  app.handle(req, res);
+app.get('/complaints/mine', async (req, res) => {
+  try {
+    const workerId = String(req.query.worker_id || '');
+    if (!workerId) {
+      return res.status(400).json({ detail: 'worker_id is required' });
+    }
+
+    const result = await pool.query(
+      `SELECT id, worker_id, platform, category, description, is_anonymous, tags, status, upvotes, created_at, updated_at
+       FROM grievance.complaints
+       WHERE worker_id = $1
+       ORDER BY created_at DESC`,
+      [workerId],
+    );
+
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('GET /complaints/mine error:', err?.message || err);
+    res.status(400).json({ detail: err?.message || 'Could not load your complaints' });
+  }
 });
 
 app.listen(PORT, () => {
