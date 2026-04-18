@@ -23,6 +23,8 @@
     "csv-parser": "^3.2.0",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
+    "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.6",
     "express": "^4.21.2",
     "express-http-proxy": "^2.1.2",
     "firebase": "^12.12.0",

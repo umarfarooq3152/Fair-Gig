@@ -112,4 +112,4 @@ export type ComplaintSpike = {
   latest_seen_at?: string;
 };
 
-export type AppSection = 'earnings' | 'community' | 'advocate' | 'verifier';
+export type AppSection = 'dashboard' | 'earnings' | 'community' | 'advocate' | 'verifier';

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { grievanceBases } from '../app/config';
+import { clusterTagOptions, grievanceBases } from '../app/config';
 import { fetchWithFallback, getErrorMessage } from '../app/helpers';
 import type { ComplaintCluster, ComplaintItem, ComplaintSpike } from '../app/types';
 
@@ -33,17 +33,27 @@ export default function AdvocateQueue({ token }: Props) {
 
   const [platformFilter, setPlatformFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [tagFilter, setTagFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | ComplaintItem['status']>('all');
   const [search, setSearch] = useState('');
   const [focusClusterId, setFocusClusterId] = useState<'all' | '__unclustered__' | string>('all');
 
   const [clusterName, setClusterName] = useState('Systemic Issue Cluster');
   const [clusterTag, setClusterTag] = useState('payment_delay');
-  const [existingClusterId, setExistingClusterId] = useState('');
-  const [bulkTagsInput, setBulkTagsInput] = useState('');
+  const [existingClusterId, setExistingClusterId] = useState('all');
+  const [bulkTags, setBulkTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState('');
 
   const [showClusterModal, setShowClusterModal] = useState(false);
   const [clusterFilter, setClusterFilter] = useState('');
+  const [clusterModalMode, setClusterModalMode] = useState<'full' | 'create-only'>('full');
+  const [draggedComplaintId, setDraggedComplaintId] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<null | {
+    title: string;
+    message: string;
+    actionLabel: string;
+    action: () => Promise<void>;
+  }>(null);
 
   const selectedItems = useMemo(() => items.filter((item) => selectedIds.includes(item.id)), [items, selectedIds]);
   const selectedClusterId = useMemo(() => {
@@ -112,6 +122,34 @@ export default function AdvocateQueue({ token }: Props) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
   }
 
+  function getActionComplaintIds() {
+    if (draggedComplaintId && selectedIds.length === 0) {
+      return [draggedComplaintId];
+    }
+    if (draggedComplaintId && !selectedIds.includes(draggedComplaintId)) {
+      return [...selectedIds, draggedComplaintId];
+    }
+    return selectedIds;
+  }
+
+  function beginDragComplaint(id: string) {
+    setDraggedComplaintId(id);
+  }
+
+  function endDragComplaint() {
+    setDraggedComplaintId(null);
+  }
+
+  function openCreateClusterFromDragDrop() {
+    const ids = getActionComplaintIds();
+    if (ids.length < 1) {
+      setError('Select or drag at least one complaint first');
+      return;
+    }
+    setSelectedIds(ids);
+    setShowClusterModal(true);
+  }
+
   const filteredClusters = useMemo(() => {
     const needle = clusterFilter.trim().toLowerCase();
     if (!needle) return clusters;
@@ -126,6 +164,12 @@ export default function AdvocateQueue({ token }: Props) {
 
   const platformOptions = useMemo(() => Array.from(new Set(items.map((item) => item.platform))).sort((a, b) => a.localeCompare(b)), [items]);
   const categoryOptions = useMemo(() => Array.from(new Set(items.map((item) => item.category))).sort((a, b) => a.localeCompare(b)), [items]);
+  const tagOptions = useMemo(() => Array.from(new Set(items.flatMap((item) => item.tags || []))).sort((a, b) => a.localeCompare(b)), [items]);
+  const clusterNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const cluster of clusters) map[cluster.id] = cluster.name;
+    return map;
+  }, [clusters]);
 
   const visibleItems = useMemo(() => {
     let scoped = items;
@@ -138,6 +182,7 @@ export default function AdvocateQueue({ token }: Props) {
 
     if (platformFilter !== 'all') scoped = scoped.filter((item) => item.platform === platformFilter);
     if (categoryFilter !== 'all') scoped = scoped.filter((item) => item.category === categoryFilter);
+    if (tagFilter !== 'all') scoped = scoped.filter((item) => (item.tags || []).includes(tagFilter));
     if (statusFilter !== 'all') scoped = scoped.filter((item) => item.status === statusFilter);
 
     const needle = search.trim().toLowerCase();
@@ -155,7 +200,7 @@ export default function AdvocateQueue({ token }: Props) {
       const right = new Date(b.created_at || 0).getTime();
       return right - left;
     });
-  }, [items, focusClusterId, platformFilter, categoryFilter, statusFilter, search]);
+  }, [items, focusClusterId, platformFilter, categoryFilter, tagFilter, statusFilter, search]);
 
   const grouped = useMemo(() => {
     const out: Record<string, Record<string, ComplaintItem[]>> = {};
@@ -177,8 +222,7 @@ export default function AdvocateQueue({ token }: Props) {
   }
 
   async function assignTags() {
-    const tags = bulkTagsInput.split(',').map((tag) => tag.trim()).filter(Boolean);
-    if (selectedIds.length < 1 || tags.length < 1) {
+    if (selectedIds.length < 1 || bulkTags.length < 1) {
       setError('Select complaints and provide at least one tag');
       return;
     }
@@ -187,21 +231,34 @@ export default function AdvocateQueue({ token }: Props) {
       const { response, payload } = await fetchWithFallback(grievanceBases, '/complaints/bulk/tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ complaint_ids: selectedIds, tags }),
+        body: JSON.stringify({ complaint_ids: selectedIds, tags: bulkTags }),
       });
       if (!response.ok) {
         setError(getErrorMessage(payload, 'Could not assign tags'));
         return;
       }
 
-      setItems((prev) => prev.map((item) => (selectedIds.includes(item.id) ? { ...item, tags } : item)));
+      setItems((prev) => prev.map((item) => (selectedIds.includes(item.id) ? { ...item, tags: bulkTags } : item)));
       setSelectedIds([]);
+      setBulkTags([]);
       setSuccess('Tags assigned');
     });
   }
 
+  function addTagChip(raw: string) {
+    const next = raw.trim().replace(/^#/, '').toLowerCase();
+    if (!next) return;
+    setBulkTags((prev) => (prev.includes(next) ? prev : [...prev, next]));
+    setTagDraft('');
+  }
+
+  function removeTagChip(tag: string) {
+    setBulkTags((prev) => prev.filter((t) => t !== tag));
+  }
+
   async function createCluster() {
-    if (selectedIds.length < 1) {
+    const complaintIds = getActionComplaintIds();
+    if (complaintIds.length < 1) {
       setError('Select at least one complaint');
       return;
     }
@@ -211,10 +268,10 @@ export default function AdvocateQueue({ token }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          complaint_ids: selectedIds,
+          complaint_ids: complaintIds,
           name: clusterName,
           primary_tag: clusterTag,
-          platform: selectedItems[0]?.platform || null,
+          platform: items.find((item) => complaintIds.includes(item.id))?.platform || null,
         }),
       });
 
@@ -228,6 +285,7 @@ export default function AdvocateQueue({ token }: Props) {
       setItems((prev) => prev.map((item) => (linkedIds.includes(item.id) ? { ...item, cluster_id: clusterId } : item)));
       setSelectedIds([]);
       setShowClusterModal(false);
+      endDragComplaint();
       await loadClusters();
       setSuccess('Cluster created');
     });
@@ -235,7 +293,8 @@ export default function AdvocateQueue({ token }: Props) {
 
   async function addToExistingCluster(targetClusterId?: string) {
     const clusterId = targetClusterId || existingClusterId;
-    if (!clusterId || selectedIds.length < 1) {
+    const complaintIds = getActionComplaintIds();
+    if (!clusterId || clusterId === 'all' || complaintIds.length < 1) {
       setError('Select cluster and complaints first');
       return;
     }
@@ -244,7 +303,7 @@ export default function AdvocateQueue({ token }: Props) {
       const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/cluster/${clusterId}/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ complaint_ids: selectedIds }),
+        body: JSON.stringify({ complaint_ids: complaintIds }),
       });
 
       if (!response.ok) {
@@ -256,6 +315,7 @@ export default function AdvocateQueue({ token }: Props) {
       setItems((prev) => prev.map((item) => (linkedIds.includes(item.id) ? { ...item, cluster_id: clusterId } : item)));
       setSelectedIds([]);
       setShowClusterModal(false);
+      endDragComplaint();
       await loadClusters();
       setSuccess('Added to cluster');
     });
@@ -337,6 +397,30 @@ export default function AdvocateQueue({ token }: Props) {
     });
   }
 
+  async function deleteCluster(clusterId: string) {
+    await withBusy(async () => {
+      const { response, payload } = await fetchWithFallback(grievanceBases, `/complaints/cluster/${clusterId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        setError(getErrorMessage(payload, 'Could not delete cluster'));
+        return;
+      }
+
+      setItems((prev) => prev.map((item) => (item.cluster_id === clusterId ? { ...item, cluster_id: null } : item)));
+      setClusters((prev) => prev.filter((cluster) => cluster.id !== clusterId));
+      if (existingClusterId === clusterId) setExistingClusterId('all');
+      if (focusClusterId === clusterId) setFocusClusterId('all');
+      setSuccess('Cluster deleted');
+    });
+  }
+
+  function requestConfirm(title: string, message: string, actionLabel: string, action: () => Promise<void>) {
+    setConfirmModal({ title, message, actionLabel, action });
+  }
+
   const platformEntries = Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
 
   return (
@@ -365,7 +449,13 @@ export default function AdvocateQueue({ token }: Props) {
                 ))}
               </select>
             </div>
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2 md:grid-cols-3">
+              <select className="rounded border border-slate-300 px-2 py-2 text-xs" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+                <option value="all">All Tags</option>
+                {tagOptions.map((tag) => (
+                  <option key={tag} value={tag}>#{tag}</option>
+                ))}
+              </select>
               <select className="rounded border border-slate-300 px-2 py-2 text-xs" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'all' | ComplaintItem['status'])}>
                 <option value="all">All Status</option>
                 <option value="open">open</option>
@@ -385,6 +475,7 @@ export default function AdvocateQueue({ token }: Props) {
               setSearch('');
               setPlatformFilter('all');
               setCategoryFilter('all');
+              setTagFilter('all');
               setStatusFilter('all');
               setFocusClusterId('all');
             }}>
@@ -404,22 +495,46 @@ export default function AdvocateQueue({ token }: Props) {
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">Tags</p>
-              <input className="mb-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Assign tags (comma-separated)" value={bulkTagsInput} onChange={(e) => setBulkTagsInput(e.target.value)} />
+              <input
+                className="mb-2 w-full rounded border border-slate-300 px-2 py-2 text-xs"
+                placeholder="Type tag and press Enter"
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addTagChip(tagDraft);
+                  }
+                }}
+              />
+              <div className="mb-2 flex min-h-8 flex-wrap gap-1">
+                {bulkTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold text-cyan-700"
+                    onClick={() => removeTagChip(tag)}
+                  >
+                    #{tag}
+                    <span className="text-cyan-500">x</span>
+                  </button>
+                ))}
+              </div>
               <button className="w-full rounded bg-slate-900 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void assignTags()}>Assign Tags</button>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">Status</p>
               <div className="grid gap-2">
-                <button className="rounded bg-amber-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void updateStatus('escalated')}>Mark Escalated</button>
-                <button className="rounded bg-emerald-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void updateStatus('resolved')}>Approve (Resolve)</button>
+                <button className="rounded bg-amber-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => requestConfirm('Confirm Escalation', `Escalate ${selectedIds.length} selected complaint(s)?`, 'Escalate', async () => { await updateStatus('escalated'); })}>Mark Escalated</button>
+                <button className="rounded bg-emerald-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => requestConfirm('Confirm Resolve', `Resolve ${selectedIds.length} selected complaint(s)?`, 'Resolve', async () => { await updateStatus('resolved'); })}>Approve (Resolve)</button>
               </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">Cluster & Selection</p>
               <div className="grid gap-2">
-                <button className="rounded bg-sky-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => setShowClusterModal(true)}>Add / Create Cluster</button>
+                <button className="rounded bg-sky-600 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => { setClusterModalMode('full'); setShowClusterModal(true); }}>Add / Create Cluster</button>
                 <button className="rounded bg-indigo-500 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || visibleItems.length < 1} onClick={selectAllVisible}>Select All Visible</button>
                 <button className="rounded bg-slate-700 px-2 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => setSelectedIds([])}>Clear Selection</button>
               </div>
@@ -466,7 +581,13 @@ export default function AdvocateQueue({ token }: Props) {
                               <button
                                 key={item.id}
                                 type="button"
+                                draggable
                                 onClick={() => toggleSelection(item.id)}
+                                onDragStart={(e) => {
+                                  beginDragComplaint(item.id);
+                                  e.dataTransfer.effectAllowed = 'move';
+                                }}
+                                onDragEnd={endDragComplaint}
                                 className={`w-full rounded-lg border p-2 text-left transition ${selectedIds.includes(item.id) ? 'border-slate-900 bg-slate-100 ring-1 ring-slate-900/30' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
                               >
                                 <div className="flex items-start justify-between gap-2">
@@ -499,10 +620,12 @@ export default function AdvocateQueue({ token }: Props) {
                                   <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold capitalize ${statusChipClass(item.status)}`}>
                                     {item.status}
                                   </span>
-                                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.cluster_id ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-100 text-slate-600'}`}>
-                                    {item.cluster_id ? `Cluster ${item.cluster_id.slice(0, 6)}` : 'Open (Unclustered)'}
-                                  </span>
-                                  {(item.tags || []).slice(0, 2).map((tag) => (
+                                  {item.cluster_id && (
+                                    <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                      {clusterNameMap[item.cluster_id] || 'Cluster'}
+                                    </span>
+                                  )}
+                                  {(item.tags || []).map((tag) => (
                                     <span key={`${item.id}-${tag}`} className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold text-cyan-700">#{tag}</span>
                                   ))}
                                 </div>
@@ -521,30 +644,54 @@ export default function AdvocateQueue({ token }: Props) {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-4">
           <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">Clusters</h3>
+          <div
+            className="mt-2 rounded-lg border-2 border-dashed border-sky-300 bg-sky-50 p-2 text-xs text-sky-800"
+            onDragOver={(e) => {
+              e.preventDefault();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setClusterModalMode('create-only');
+              openCreateClusterFromDragDrop();
+            }}
+          >
+            Drag complaints here to create a new cluster
+          </div>
           <select className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" value={existingClusterId} onChange={(e) => setExistingClusterId(e.target.value)}>
-            <option value="">Select cluster</option>
+            <option value="all">All clusters</option>
             {clusters.map((cluster) => (
               <option key={cluster.id} value={cluster.id}>{cluster.name} ({cluster.complaint_count || 0})</option>
             ))}
           </select>
 
-          {existingClusterId && (
+          {existingClusterId !== 'all' && (
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <button type="button" className="rounded bg-amber-500 px-2 py-1.5 text-xs font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(existingClusterId, 'escalated')}>Escalate</button>
-              <button type="button" className="rounded bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(existingClusterId, 'resolved')}>Resolve</button>
+              <button type="button" className="rounded bg-amber-500 px-2 py-1.5 text-xs font-semibold text-white" disabled={busy} onClick={() => requestConfirm('Confirm Cluster Escalation', 'Escalate all complaints in this cluster?', 'Escalate Cluster', async () => { await updateClusterStatus(existingClusterId, 'escalated'); })}>Escalate</button>
+              <button type="button" className="rounded bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white" disabled={busy} onClick={() => requestConfirm('Confirm Cluster Resolve', 'Resolve all complaints in this cluster?', 'Resolve Cluster', async () => { await updateClusterStatus(existingClusterId, 'resolved'); })}>Resolve</button>
+              <button type="button" className="col-span-2 rounded bg-rose-600 px-2 py-1.5 text-xs font-semibold text-white" disabled={busy} onClick={() => requestConfirm('Delete Cluster', 'Delete this cluster and uncluster all linked complaints?', 'Delete Cluster', async () => { await deleteCluster(existingClusterId); })}>Delete Cluster</button>
             </div>
           )}
 
           <div className="mt-3 max-h-[360px] space-y-2 overflow-auto">
-            <button type="button" className={`w-full rounded border px-2 py-1.5 text-left text-[11px] font-semibold ${focusClusterId === '__unclustered__' ? 'border-slate-900 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-700'}`} onClick={() => setFocusClusterId('__unclustered__')}>Focus Unclustered</button>
             {clusters.map((cluster) => (
-              <div key={cluster.id} className="rounded border border-slate-200 bg-slate-50 p-2">
+              <div
+                key={cluster.id}
+                className="rounded border border-slate-200 bg-slate-50 p-2"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  void addToExistingCluster(cluster.id);
+                }}
+              >
                 <p className="text-xs font-semibold text-slate-800">{cluster.name}</p>
                 <p className="text-[11px] text-slate-500">{cluster.primary_tag || 'untagged'} · {cluster.platform || 'mixed'} · {cluster.complaint_count || 0}</p>
                 <div className="mt-2 flex gap-2">
-                  <button type="button" className={`rounded px-2 py-1 text-[11px] font-semibold ${focusClusterId === cluster.id ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-800'}`} onClick={() => setFocusClusterId(cluster.id)}>{focusClusterId === cluster.id ? 'Focused' : 'Focus'}</button>
-                  <button type="button" className="rounded bg-amber-500 px-2 py-1 text-[11px] font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(cluster.id, 'escalated')}>Escalate</button>
-                  <button type="button" className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white" disabled={busy} onClick={() => void updateClusterStatus(cluster.id, 'resolved')}>Resolve</button>
+                  <button type="button" className={`rounded px-2 py-1 text-[11px] font-semibold ${focusClusterId === cluster.id ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-800'}`} onClick={() => setFocusClusterId((prev) => (prev === cluster.id ? 'all' : cluster.id))}>{focusClusterId === cluster.id ? 'Unfocus' : 'Focus'}</button>
+                  <button type="button" className="rounded bg-amber-500 px-2 py-1 text-[11px] font-semibold text-white" disabled={busy} onClick={() => requestConfirm('Confirm Cluster Escalation', `Escalate cluster ${cluster.name}?`, 'Escalate', async () => { await updateClusterStatus(cluster.id, 'escalated'); })}>Escalate</button>
+                  <button type="button" className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white" disabled={busy} onClick={() => requestConfirm('Confirm Cluster Resolve', `Resolve cluster ${cluster.name}?`, 'Resolve', async () => { await updateClusterStatus(cluster.id, 'resolved'); })}>Resolve</button>
+                  <button type="button" className="rounded bg-rose-600 px-2 py-1 text-[11px] font-semibold text-white" disabled={busy} onClick={() => requestConfirm('Delete Cluster', `Delete cluster ${cluster.name} and uncluster linked complaints?`, 'Delete', async () => { await deleteCluster(cluster.id); })}>Delete</button>
                 </div>
               </div>
             ))}
@@ -576,41 +723,70 @@ export default function AdvocateQueue({ token }: Props) {
               <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600" onClick={() => setShowClusterModal(false)}>Close</button>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <section className="rounded-xl border border-slate-200 p-3">
-                <h4 className="text-sm font-semibold text-slate-900">Add to Existing Cluster</h4>
-                <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Search cluster by name/platform/tag" value={clusterFilter} onChange={(e) => setClusterFilter(e.target.value)} />
-                <div className="mt-2 max-h-56 space-y-2 overflow-auto">
-                  {filteredClusters.length === 0 ? (
-                    <p className="text-xs text-slate-500">No clusters found.</p>
-                  ) : (
-                    filteredClusters.map((cluster) => (
-                      <button
-                        key={cluster.id}
-                        type="button"
-                        className={`w-full rounded border px-2 py-2 text-left text-xs ${existingClusterId === cluster.id ? 'border-slate-900 bg-slate-100' : 'border-slate-200 bg-white'}`}
-                        onClick={() => setExistingClusterId(cluster.id)}
-                      >
-                        <p className="font-semibold text-slate-900">{cluster.name}</p>
-                        <p className="text-[11px] text-slate-500">{cluster.primary_tag || 'untagged'} · {cluster.platform || 'mixed'} · {cluster.complaint_count || 0}</p>
-                      </button>
-                    ))
-                  )}
-                </div>
-                <button type="button" className="mt-3 w-full rounded bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={!existingClusterId || busy} onClick={() => void addToExistingCluster()}>
-                  Add Selected To Chosen Cluster
-                </button>
-              </section>
+            <div className={`grid gap-4 ${clusterModalMode === 'full' ? 'md:grid-cols-2' : 'md:grid-cols-1'}`}>
+              {clusterModalMode === 'full' && (
+                <section className="rounded-xl border border-slate-200 p-3">
+                  <h4 className="text-sm font-semibold text-slate-900">Add to Existing Cluster</h4>
+                  <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Search cluster by name/platform/tag" value={clusterFilter} onChange={(e) => setClusterFilter(e.target.value)} />
+                  <div className="mt-2 max-h-56 space-y-2 overflow-auto">
+                    {filteredClusters.length === 0 ? (
+                      <p className="text-xs text-slate-500">No clusters found.</p>
+                    ) : (
+                      filteredClusters.map((cluster) => (
+                        <button
+                          key={cluster.id}
+                          type="button"
+                          className={`w-full rounded border px-2 py-2 text-left text-xs ${existingClusterId === cluster.id ? 'border-slate-900 bg-slate-100' : 'border-slate-200 bg-white'}`}
+                          onClick={() => setExistingClusterId(cluster.id)}
+                        >
+                          <p className="font-semibold text-slate-900">{cluster.name}</p>
+                          <p className="text-[11px] text-slate-500">{cluster.primary_tag || 'untagged'} · {cluster.platform || 'mixed'} · {cluster.complaint_count || 0}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <button type="button" className="mt-3 w-full rounded bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={existingClusterId === 'all' || !existingClusterId || busy} onClick={() => void addToExistingCluster()}>
+                    Add Selected To Chosen Cluster
+                  </button>
+                </section>
+              )}
 
               <section className="rounded-xl border border-slate-200 p-3">
                 <h4 className="text-sm font-semibold text-slate-900">Create New Cluster</h4>
                 <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Cluster name" value={clusterName} onChange={(e) => setClusterName(e.target.value)} />
-                <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Primary tag" value={clusterTag} onChange={(e) => setClusterTag(e.target.value)} />
+                <select className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" value={clusterTag} onChange={(e) => setClusterTag(e.target.value)}>
+                  {clusterTagOptions.map((tag) => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
                 <p className="mt-2 text-[11px] text-slate-500">Create a new cluster from one or more selected complaints.</p>
                 <button type="button" className="mt-3 w-full rounded bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void createCluster()}>
                   Create Cluster From Selected
                 </button>
               </section>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+            <h3 className="text-base font-bold text-slate-900">{confirmModal.title}</h3>
+            <p className="mt-2 text-sm text-slate-600">{confirmModal.message}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" onClick={() => setConfirmModal(null)}>Cancel</button>
+              <button
+                type="button"
+                className="rounded bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
+                onClick={() => {
+                  const action = confirmModal.action;
+                  setConfirmModal(null);
+                  void action();
+                }}
+              >
+                {confirmModal.actionLabel}
+              </button>
             </div>
           </div>
         </div>
