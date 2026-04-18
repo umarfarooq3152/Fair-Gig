@@ -18,6 +18,14 @@ async function safeJson<T>(res: Response): Promise<T | null> {
   }
 }
 
+async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    return new Response(null, { status: 502, statusText: 'Bad Gateway' });
+  }
+}
+
 export async function loadAdvocateDashboard(): Promise<AdvocateDashboardPayload> {
   const errors: string[] = [];
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -31,15 +39,15 @@ export async function loadAdvocateDashboard(): Promise<AdvocateDashboardPayload>
     clustersRes,
     inboxRes,
   ] = await Promise.all([
-    fetch(`${API_BASE.analytics}/analytics/advocate-summary`, { cache: 'no-store' }),
-    fetch(`${API_BASE.analytics}/analytics/commission-trends`, { cache: 'no-store' }),
-    fetch(`${API_BASE.analytics}/analytics/income-by-zone-category`, { cache: 'no-store' }),
-    fetch(`${API_BASE.analytics}/analytics/top-complaints`, { cache: 'no-store' }),
-    fetch(`${API_BASE.analytics}/analytics/vulnerability-flags`, { cache: 'no-store' }),
-    fetch(`${API_BASE.grievance}/api/complaints/board/tag-clusters`, { cache: 'no-store' }),
+    safeFetch(`${API_BASE.analytics}/analytics/advocate-summary`, { cache: 'no-store' }),
+    safeFetch(`${API_BASE.analytics}/analytics/commission-trends`, { cache: 'no-store' }),
+    safeFetch(`${API_BASE.analytics}/analytics/income-by-zone-category`, { cache: 'no-store' }),
+    safeFetch(`${API_BASE.analytics}/analytics/top-complaints`, { cache: 'no-store' }),
+    safeFetch(`${API_BASE.analytics}/analytics/vulnerability-flags`, { cache: 'no-store' }),
+    safeFetch(`${API_BASE.grievance}/api/complaints/board/tag-clusters`, { cache: 'no-store' }),
     authFetch(
       `${API_BASE.grievance}/api/complaints/advocate/new-count?${new URLSearchParams({ since })}`,
-    ),
+    ).catch(() => new Response(null, { status: 502, statusText: 'Bad Gateway' })),
   ]);
 
   const summary = await safeJson<AdvocateSummary>(summaryRes);

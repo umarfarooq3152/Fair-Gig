@@ -18,11 +18,6 @@ type AdvocateNavItem = { href: string; label: string; hash?: string };
 
 const advocateNav: AdvocateNavItem[] = [
   { href: '/advocate/analytics', label: 'Dashboard' },
-  { href: '/advocate/analytics', label: 'Commission trends', hash: '#commission-trends' },
-  { href: '/advocate/analytics', label: 'Income analysis', hash: '#income-zones' },
-  { href: '/advocate/analytics', label: 'Vulnerability flags', hash: '#vulnerability' },
-  { href: '/advocate/analytics', label: 'Top complaints', hash: '#top-complaints' },
-  { href: '/advocate/analytics', label: 'Grievance clusters', hash: '#grievance-clusters' },
   { href: '/advocate/grievances', label: 'Grievance board' },
   { href: '/community', label: 'Community' },
 ];
@@ -99,9 +94,8 @@ export default function RoleSidebar() {
                 <Link
                   key={`${item.label}-${item.hash ?? 'root'}`}
                   href={href}
-                  className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                    active ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
+                  className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${active ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
                 >
                   {item.label}
                 </Link>
@@ -143,9 +137,8 @@ export default function RoleSidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`block rounded px-3 py-2 text-sm ${
-                active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
-              }`}
+              className={`block rounded px-3 py-2 text-sm ${active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+                }`}
             >
               {item.label}
             </Link>

@@ -277,7 +277,7 @@ def vulnerability_flags():
                    < SUM(CASE
                     WHEN date_trunc('month', s.shift_date) = date_trunc('month', NOW() - INTERVAL '1 month')
                     THEN s.net_received ELSE 0 END) * 0.8
-                ORDER BY current_month / NULLIF(previous_month, 0) ASC
+                ORDER BY drop_percentage DESC
                 """
             )
             return cur.fetchall()

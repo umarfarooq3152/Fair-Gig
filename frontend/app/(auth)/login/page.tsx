@@ -76,7 +76,10 @@ export default function LoginPage() {
       localStorage.setItem('fairgig_city_zone', user.city_zone || 'DHA');
       localStorage.setItem('fairgig_category', user.category || 'ride_hailing');
 
-      document.cookie = `fairgig_access_token=${data.access_token}; path=/`;
+      // Set cookie with proper flags so middleware receives it
+      const expiresIn = 8 * 60 * 60 * 1000; // 8 hours
+      const expiryDate = new Date(Date.now() + expiresIn);
+      document.cookie = `fairgig_access_token=${data.access_token}; path=/; expires=${expiryDate.toUTCString()}; SameSite=Strict`;
 
       if (user.role === 'worker') router.push('/dashboard');
       else if (user.role === 'verifier') router.push('/queue');

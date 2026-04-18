@@ -58,7 +58,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     }
 
     setReady(true);
-  }, [isPublic, pathname, router, usesDedicatedLayout]);
+  }, [isPublic, pathname, usesDedicatedLayout]);
 
   if (!isPublic && !ready) {
     return (
