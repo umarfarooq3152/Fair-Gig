@@ -4,16 +4,16 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
+import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, LineChart, Line, Cell
 } from 'recharts';
-import { 
-  LayoutDashboard, 
-  History, 
-  AlertTriangle, 
-  FileText, 
-  CheckCircle2, 
+import {
+  LayoutDashboard,
+  History,
+  AlertTriangle,
+  FileText,
+  CheckCircle2,
   ExternalLink,
   ChevronRight,
   Plus,
@@ -86,7 +86,7 @@ export default function App() {
   // Auto-login for demo if no token
   useEffect(() => {
     if (!token) {
-      handleLogin('worker1@fairgig.demo', 'password123');
+      handleLogin('worker1@fairgig.demo', 'password');
     } else {
       fetchInitialData();
     }
@@ -104,9 +104,19 @@ export default function App() {
         localStorage.setItem('fairgig_token', data.access_token);
         localStorage.setItem('fairgig_user_id', data.user_id);
         setToken(data.access_token);
+      } else {
+        // Login failed — use mock data so UI is not stuck
+        console.warn('Login failed, using mock data. Run npm run seed first.');
+        setUser(MOCK_USER);
+        setShifts(MOCK_SHIFTS);
+        setLoading(false);
       }
     } catch (e) {
       console.error('Login failed', e);
+      // Network error — use mock data so UI is not stuck
+      setUser(MOCK_USER);
+      setShifts(MOCK_SHIFTS);
+      setLoading(false);
     }
   };
 
@@ -186,16 +196,15 @@ export default function App() {
             FairGig
           </div>
           <nav className="flex gap-6">
-            {(user?.role === 'advocate' 
-              ? ['dashboard', 'analytics', 'grievances'] 
+            {(user?.role === 'advocate'
+              ? ['dashboard', 'analytics', 'grievances']
               : ['dashboard', 'shifts', 'grievances', 'certificate']
             ).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab as any)}
-                className={`text-sm font-semibold capitalize pt-1 pb-1 transition-all relative ${
-                  activeTab === tab ? 'text-text-main' : 'text-text-muted hover:text-text-main'
-                }`}
+                className={`text-sm font-semibold capitalize pt-1 pb-1 transition-all relative ${activeTab === tab ? 'text-text-main' : 'text-text-muted hover:text-text-main'
+                  }`}
               >
                 {tab}
                 {activeTab === tab && (
@@ -243,28 +252,28 @@ export default function App() {
                     <AreaChart data={EARNINGS_TREND}>
                       <defs>
                         <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                       <XAxis dataKey="name" hide />
                       <YAxis hide domain={['dataMin - 500', 'dataMax + 500']} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#fff', 
-                          borderRadius: '12px', 
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          borderRadius: '12px',
                           border: '1px solid #E5E7EB',
                           boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
                         }}
                       />
-                      <Area 
-                        type="monotone" 
-                        dataKey="value" 
-                        stroke="#10b981" 
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        stroke="#10b981"
                         strokeWidth={3}
-                        fillOpacity={1} 
-                        fill="url(#colorValue)" 
+                        fillOpacity={1}
+                        fill="url(#colorValue)"
                       />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -326,8 +335,8 @@ export default function App() {
                 <div className="card-title-bento">City Comparison</div>
                 <div className="text-[11px] font-bold mb-3">{MOCK_USER.city_zone} Median</div>
                 <div className="w-full h-2 bg-gray-100 rounded-full relative overflow-visible">
-                  <div className="absolute top-0 left-0 h-full bg-brand rounded-full" 
-                       style={{ width: `${Math.min(100, (avgHourlyRate / (median * 1.5)) * 100)}%` }} />
+                  <div className="absolute top-0 left-0 h-full bg-brand rounded-full"
+                    style={{ width: `${Math.min(100, (avgHourlyRate / (median * 1.5)) * 100)}%` }} />
                   <div className="absolute top-[-4px] left-[66%] h-4 w-0.5 bg-black" />
                 </div>
                 <div className="flex justify-between mt-3">
@@ -349,10 +358,9 @@ export default function App() {
                   {shifts.slice(0, 3).map((shift) => (
                     <div key={shift.id} className="flex items-center justify-between py-2 border-b border-border-dim last:border-0 hover:bg-gray-50/50 px-2 rounded-lg transition-colors cursor-pointer group">
                       <div className="flex items-center gap-3">
-                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
-                          shift.platform === 'Careem' ? 'bg-green-100 text-green-700' : 
-                          shift.platform === 'Bykea' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100'
-                        }`}>
+                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${shift.platform === 'Careem' ? 'bg-green-100 text-green-700' :
+                            shift.platform === 'Bykea' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100'
+                          }`}>
                           {shift.platform}
                         </div>
                         <div className="text-xs font-semibold text-text-main">{shift.shift_date}</div>
@@ -425,10 +433,9 @@ export default function App() {
                         <td className="px-6 py-4 text-xs font-bold text-text-muted">Rs. {shift.gross_earned}</td>
                         <td className="px-6 py-4 text-xs font-black">Rs. {shift.net_received}</td>
                         <td className="px-6 py-4">
-                          <span className={`badge-bento ${
-                            shift.verification_status === 'verified' ? 'bg-brand/10 text-brand' : 
-                            shift.verification_status === 'pending' ? 'bg-yellow-50 text-warning' : 'bg-red-50 text-danger'
-                          }`}>
+                          <span className={`badge-bento ${shift.verification_status === 'verified' ? 'bg-brand/10 text-brand' :
+                              shift.verification_status === 'pending' ? 'bg-yellow-50 text-warning' : 'bg-red-50 text-danger'
+                            }`}>
                             {shift.verification_status}
                           </span>
                         </td>
@@ -506,7 +513,7 @@ export default function App() {
                   <p className="text-[10px] text-text-muted italic mb-6">
                     This document certifies that the individual named above has successfully verified their platform earnings through FairGig protocols as of {new Date().toLocaleDateString()}.
                   </p>
-                  <button 
+                  <button
                     onClick={() => window.print()}
                     className="btn-bento btn-bento-primary no-print"
                   >
@@ -571,8 +578,8 @@ export default function App() {
 
                 {/* Top Complaints */}
                 <div className="card-bento md:col-span-1">
-                   <div className="card-title-bento mb-4">Top Grievance Categories</div>
-                   <div className="h-[240px]">
+                  <div className="card-title-bento mb-4">Top Grievance Categories</div>
+                  <div className="h-[240px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart layout="vertical" data={topComplaintsData} margin={{ left: 20 }}>
                         <XAxis type="number" hide />
