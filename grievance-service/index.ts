@@ -959,6 +959,62 @@ app.put('/api/complaints/cluster/:id/status', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// DELETE /api/complaints/cluster/:id — Delete cluster and uncluster complaints
+// ---------------------------------------------------------------------------
+app.delete('/api/complaints/cluster/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await requireRole(req, ['advocate']);
+    const { id } = req.params;
+
+    await client.query('BEGIN');
+
+    const clusterExists = await client.query(
+      `SELECT id, name FROM grievance.complaint_clusters WHERE id = $1`,
+      [id],
+    );
+    if (!clusterExists.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ detail: 'Cluster not found' });
+    }
+
+    const detached = await client.query(
+      `UPDATE grievance.complaints
+       SET cluster_id = NULL
+       WHERE cluster_id = $1
+       RETURNING id`,
+      [id],
+    );
+
+    await client.query(
+      `DELETE FROM grievance.complaint_clusters
+       WHERE id = $1`,
+      [id],
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      deleted_cluster_id: id,
+      detached_count: detached.rows.length,
+      detached_complaint_ids: detached.rows.map((row) => row.id),
+    });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    if (err.message === 'Forbidden') {
+      return res.status(403).json({ detail: 'Advocate access required' });
+    }
+    if (err.message?.includes('token')) {
+      return res.status(401).json({ detail: err.message });
+    }
+    console.error('DELETE /api/complaints/cluster/:id error:', err.message);
+    return res.status(400).json({ detail: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 function grievancesStatusEvents(
   beforeRows: Array<{ id: string; status: string }>,
   afterRows: Array<{ id: string; status: string }>,
