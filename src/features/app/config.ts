@@ -33,3 +33,15 @@ export const grievanceBases = env.VITE_GRIEVANCE_BASE_URL
 export const anomalyBases = env.VITE_ANOMALY_BASE_URL
   ? [env.VITE_ANOMALY_BASE_URL]
   : ['/api/anomaly', 'http://localhost:8003'];
+export const analyticsBases = env.VITE_ANALYTICS_BASE_URL
+  ? [env.VITE_ANALYTICS_BASE_URL]
+  : ['/api/analytics', 'http://localhost:8005/analytics'];
+
+export const clusterTagOptions = [
+  'payment_delay',
+  'commission_hike',
+  'account_deactivation',
+  'unfair_rating',
+  'data_privacy',
+  'other',
+];

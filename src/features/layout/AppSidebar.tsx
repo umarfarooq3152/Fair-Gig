@@ -24,6 +24,7 @@ export default function AppSidebar({ role, activeSection, setActiveSection, onLo
       <nav className="space-y-1.5">
         {role === 'worker' && (
           <>
+            <button type="button" className={`${base} ${activeSection === 'dashboard' ? active : idle}`} onClick={() => setActiveSection('dashboard')}>Dashboard</button>
             <button type="button" className={`${base} ${activeSection === 'earnings' ? active : idle}`} onClick={() => setActiveSection('earnings')}>Earnings</button>
             <button type="button" className={`${base} ${activeSection === 'community' ? active : idle}`} onClick={() => setActiveSection('community')}>Community Board</button>
             <button type="button" className={`${base} ${activeSection === 'advocate' ? active : idle}`} onClick={() => setActiveSection('advocate')}>Anomaly Insights</button>

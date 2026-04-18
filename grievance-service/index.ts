@@ -582,8 +582,8 @@ app.post('/api/complaints/cluster', async (req, res) => {
     const auth = await requireRole(req, ['advocate']);
     const { complaint_ids, name, platform, primary_tag } = req.body;
 
-    if (!Array.isArray(complaint_ids) || complaint_ids.length < 2) {
-      return res.status(400).json({ detail: 'complaint_ids must include at least 2 complaints' });
+    if (!Array.isArray(complaint_ids) || complaint_ids.length < 1) {
+      return res.status(400).json({ detail: 'complaint_ids must include at least 1 complaint' });
     }
 
     await client.query('BEGIN');

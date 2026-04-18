@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { grievanceBases } from '../app/config';
+import { clusterTagOptions, grievanceBases } from '../app/config';
 import { fetchWithFallback, getErrorMessage } from '../app/helpers';
 import type { ComplaintCluster, ComplaintItem, ComplaintSpike } from '../app/types';
 
@@ -754,7 +754,11 @@ export default function AdvocateQueue({ token }: Props) {
               <section className="rounded-xl border border-slate-200 p-3">
                 <h4 className="text-sm font-semibold text-slate-900">Create New Cluster</h4>
                 <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Cluster name" value={clusterName} onChange={(e) => setClusterName(e.target.value)} />
-                <input className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" placeholder="Primary tag" value={clusterTag} onChange={(e) => setClusterTag(e.target.value)} />
+                <select className="mt-2 w-full rounded border border-slate-300 px-2 py-2 text-xs" value={clusterTag} onChange={(e) => setClusterTag(e.target.value)}>
+                  {clusterTagOptions.map((tag) => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
                 <p className="mt-2 text-[11px] text-slate-500">Create a new cluster from one or more selected complaints.</p>
                 <button type="button" className="mt-3 w-full rounded bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" disabled={busy || selectedIds.length < 1} onClick={() => void createCluster()}>
                   Create Cluster From Selected

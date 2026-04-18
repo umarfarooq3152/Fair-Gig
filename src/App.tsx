@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import AuthScreen from './features/auth/AuthScreen';
-import WorkerEarnings from './features/earnings/WorkerEarnings';
-import CommunityBoard from './features/grievance/CommunityBoard';
-import AdvocateQueue from './features/grievance/AdvocateQueue';
-import VerifierQueue from './features/verifier/VerifierQueue';
-import AnomalyInsights from './features/anomaly/AnomalyInsights';
-import AppSidebar from './features/layout/AppSidebar';
+import AuthScreen from './features/auth/AuthScreen.tsx';
+import WorkerDashboard from './features/dashboard/WorkerDashboard.tsx';
+import WorkerEarnings from './features/earnings/WorkerEarnings.tsx';
+import CommunityBoard from './features/grievance/CommunityBoard.tsx';
+import AdvocateQueue from './features/grievance/AdvocateQueue.tsx';
+import VerifierQueue from './features/verifier/VerifierQueue.tsx';
+import AnomalyInsights from './features/anomaly/AnomalyInsights.tsx';
+import AppSidebar from './features/layout/AppSidebar.tsx';
 import type { AppSection, AuthUser } from './features/app/types';
 import { authBases } from './features/app/config';
 import { fetchWithFallback } from './features/app/helpers';
@@ -15,7 +16,7 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem('fairgig_token'));
   const [userId, setUserId] = useState(localStorage.getItem('fairgig_user_id'));
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [activeSection, setActiveSection] = useState<AppSection>('earnings');
+  const [activeSection, setActiveSection] = useState<AppSection>('dashboard');
 
   async function fetchProfile(authToken: string) {
     try {
@@ -30,7 +31,7 @@ export default function App() {
 
       setUser(payload);
       if (payload.role === 'worker') {
-        setActiveSection('earnings');
+        setActiveSection('dashboard');
       }
       if (payload.role === 'verifier') {
         setActiveSection('verifier');
@@ -63,7 +64,7 @@ export default function App() {
     setToken(null);
     setUserId(null);
     setUser(null);
-    setActiveSection('earnings');
+    setActiveSection('dashboard');
   }
 
   if (!token || !userId) {
@@ -99,6 +100,14 @@ export default function App() {
             </p>
           </header>
 
+          {user.role === 'worker' && activeSection === 'dashboard' && (
+            <WorkerDashboard
+              workerId={userId}
+              token={token}
+              cityZone={user.city_zone || null}
+              category={user.category || null}
+            />
+          )}
           {user.role === 'worker' && activeSection === 'earnings' && <WorkerEarnings workerId={userId} />}
           {user.role === 'worker' && activeSection === 'community' && <CommunityBoard role="worker" token={token} />}
           {user.role === 'worker' && activeSection === 'advocate' && <AnomalyInsights workerId={userId} />}
