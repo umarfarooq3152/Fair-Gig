@@ -1,67 +1,162 @@
 import express from 'express';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import { Pool } from 'pg';
+
+dotenv.config();
 
 const app = express();
 const PORT = 8005;
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : undefined,
+});
+
 app.use(cors());
 app.use(express.json());
 
-async function getDb() {
-  return open({
-    filename: './fairgig.db',
-    driver: sqlite3.Database
-  });
-}
-
-// GET /analytics/median/:category/:zone
-app.get('/analytics/median/:category/:zone', async (req, res) => {
-  const { category, zone } = req.params;
-  const db = await getDb();
-  
-  const rates = await db.all(`
-    SELECT s.net_received / s.hours_worked as hourly
-    FROM shifts s
-    JOIN users u ON u.id = s.worker_id
-    WHERE u.city_zone = ? AND u.category = ? AND s.verification_status = 'verified'
-    AND s.shift_date >= date('now', '-30 days')
-  `, [zone, category]);
-
-  if (rates.length === 0) return res.json({ median_hourly: 250 });
-  
-  const sorted = rates.map(r => r.hourly).sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-  
-  res.json({ median_hourly: Math.round(median) });
+// ---------------------------------------------------------------------------
+// GET /analytics/commission-trends — from view
+// ---------------------------------------------------------------------------
+app.get('/analytics/commission-trends', async (req, res) => {
+  const result = await pool.query(`SELECT * FROM analytics.v_commission_trends`);
+  res.json(result.rows);
 });
 
-// GET /analytics/income-distribution
+// ---------------------------------------------------------------------------
+// GET /analytics/income-distribution — from view, optional zone filter
+// ---------------------------------------------------------------------------
 app.get('/analytics/income-distribution', async (req, res) => {
-  const db = await getDb();
-  const workerStats = await db.all(`
-    SELECT u.city_zone, SUM(s.net_received) as total_income
-    FROM users u
-    JOIN shifts s ON u.id = s.worker_id
-    WHERE s.verification_status = 'verified'
-    GROUP BY u.id, u.city_zone
-  `);
+  const { zone } = req.query;
 
-  const zones = [...new Set(workerStats.map(w => w.city_zone))];
-  const distribution = zones.map(zone => {
-    const stats = workerStats.filter(w => w.city_zone === zone);
-    return {
-      zone,
-      '<20k': stats.filter(s => s.total_income < 20000).length,
-      '20k-40k': stats.filter(s => s.total_income >= 20000 && s.total_income < 40000).length,
-      '40k-60k': stats.filter(s => s.total_income >= 40000 && s.total_income < 60000).length,
-      '60k+': stats.filter(s => s.total_income >= 60000).length,
-    };
-  });
+  if (zone) {
+    const result = await pool.query(
+      `SELECT * FROM analytics.v_income_distribution WHERE city_zone = $1`,
+      [zone],
+    );
+    return res.json(result.rows);
+  }
 
-  res.json(distribution);
+  const result = await pool.query(`SELECT * FROM analytics.v_income_distribution`);
+  res.json(result.rows);
+});
+
+// ---------------------------------------------------------------------------
+// GET /analytics/vulnerability-flags — from view
+// ---------------------------------------------------------------------------
+app.get('/analytics/vulnerability-flags', async (req, res) => {
+  const result = await pool.query(`SELECT * FROM analytics.v_vulnerability_flags`);
+  res.json(result.rows);
+});
+
+// ---------------------------------------------------------------------------
+// GET /analytics/median/:category/:zone — stored function
+// ---------------------------------------------------------------------------
+app.get('/analytics/median/:category/:zone', async (req, res) => {
+  const { category, zone } = req.params;
+  const { month } = req.query; // optional: YYYY-MM-DD
+
+  try {
+    const result = await pool.query(
+      `SELECT get_city_median($1, $2, $3::DATE) AS median_hourly`,
+      [zone, category, month || null],
+    );
+
+    res.json({ median_hourly: Number(result.rows[0]?.median_hourly || 0) });
+  } catch (err: any) {
+    console.error('Median error:', err.message);
+    res.json({ median_hourly: 0 });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /analytics/top-complaints — from view
+// ---------------------------------------------------------------------------
+app.get('/analytics/top-complaints', async (req, res) => {
+  const result = await pool.query(`SELECT * FROM analytics.v_top_complaints`);
+  res.json(result.rows);
+});
+
+// ---------------------------------------------------------------------------
+// GET /analytics/verifier-queue — from view
+// ---------------------------------------------------------------------------
+app.get('/analytics/verifier-queue', async (req, res) => {
+  const result = await pool.query(`SELECT * FROM analytics.v_verifier_queue`);
+  res.json(result.rows);
+});
+
+// ---------------------------------------------------------------------------
+// GET /analytics/city-zone-medians — from view
+// ---------------------------------------------------------------------------
+app.get('/analytics/city-zone-medians', async (req, res) => {
+  const { zone, category } = req.query;
+  const values: unknown[] = [];
+  const where: string[] = [];
+
+  if (zone) {
+    values.push(zone);
+    where.push(`city_zone = $${values.length}`);
+  }
+  if (category) {
+    values.push(category);
+    where.push(`category = $${values.length}`);
+  }
+
+  const query = `
+    SELECT * FROM analytics.v_city_zone_medians
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY month DESC
+  `;
+
+  const result = await pool.query(query, values);
+  res.json(result.rows);
+});
+
+// ---------------------------------------------------------------------------
+// GET /analytics/anomaly-logs — persisted anomaly results
+// ---------------------------------------------------------------------------
+app.get('/analytics/anomaly-logs', async (req, res) => {
+  const { worker_id } = req.query;
+  const values: unknown[] = [];
+  const where: string[] = [];
+
+  if (worker_id) {
+    values.push(worker_id);
+    where.push(`worker_id = $${values.length}`);
+  }
+
+  const query = `
+    SELECT * FROM analytics.anomaly_logs
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY detected_at DESC
+    LIMIT 100
+  `;
+
+  const result = await pool.query(query, values);
+  res.json(result.rows);
+});
+
+// ---------------------------------------------------------------------------
+// GET /analytics/commission-snapshots — monthly platform snapshots
+// ---------------------------------------------------------------------------
+app.get('/analytics/commission-snapshots', async (req, res) => {
+  const { platform } = req.query;
+
+  if (platform) {
+    const result = await pool.query(
+      `SELECT * FROM analytics.commission_snapshots
+       WHERE platform = $1
+       ORDER BY snapshot_month DESC`,
+      [platform],
+    );
+    return res.json(result.rows);
+  }
+
+  const result = await pool.query(
+    `SELECT * FROM analytics.commission_snapshots ORDER BY snapshot_month DESC`,
+  );
+  res.json(result.rows);
 });
 
 app.listen(PORT, () => {
