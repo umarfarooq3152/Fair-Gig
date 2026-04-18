@@ -16,8 +16,11 @@ const pool = new Pool({
 
 const PLATFORMS = ['Careem', 'Bykea', 'foodpanda', 'Upwork', 'Other'] as const;
 const PLATFORM_DEDUCTIONS: Record<string, [number, number]> = {
-  Careem: [0.25, 0.30], Bykea: [0.18, 0.22],
-  foodpanda: [0.28, 0.35], Upwork: [0.10, 0.20], Other: [0.15, 0.25],
+  Careem: [0.20, 0.32],
+  Bykea: [0.15, 0.25],
+  foodpanda: [0.25, 0.38],
+  Upwork: [0.10, 0.20],
+  Other: [0.15, 0.25],
 };
 const CITY_ZONES = ['Gulberg', 'DHA', 'Saddar', 'Johar Town', 'Cantt', 'Other'] as const;
 const CATEGORIES = ['ride_hailing', 'food_delivery', 'freelance', 'domestic'] as const;
@@ -210,6 +213,7 @@ async function seed() {
       const gross = toMoney(hours * baseHourly);
 
       let deductionRate = randomFloat(minD, maxD);
+      deductionRate = Math.max(minD, Math.min(maxD, deductionRate));
       if (spikeIndices.has(j)) deductionRate += randomFloat(0.08, 0.20);
       deductionRate = Math.min(deductionRate, 0.55);
 
@@ -317,11 +321,11 @@ async function seed() {
   }
 
   // =========================================================================
-  // TABLE 8: grievance.complaints — 30 complaints
+  // TABLE 8: grievance.complaints — 45 complaints (competition minimum ≥ 20)
   // =========================================================================
-  console.log('📢 Seeding grievance.complaints (30 complaints)...');
+  console.log('📢 Seeding grievance.complaints (45 complaints)...');
   const complaintIds: string[] = [];
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 45; i++) {
     const status = sample(COMPLAINT_STATUSES);
     const hasAdvocate = status !== 'open';
     const r = await client.query(

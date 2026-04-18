@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, authFetch } from '@/lib/api';
 
 type Shift = {
   id: string;
@@ -22,7 +22,7 @@ export default function ShiftsPage() {
     if (!file) return;
     const formData = new FormData();
     formData.append('file', file);
-    await fetch(`${API_BASE.earnings}/shifts/${shiftId}/screenshot`, {
+    await authFetch(`${API_BASE.earnings}/shifts/${shiftId}/screenshot`, {
       method: 'POST',
       body: formData,
     });
@@ -32,8 +32,9 @@ export default function ShiftsPage() {
   const load = async () => {
     const workerId = localStorage.getItem('fairgig_user_id');
     if (!workerId) return;
-    const res = await fetch(`${API_BASE.earnings}/shifts?worker_id=${workerId}`, { cache: 'no-store' });
-    setShifts(await res.json());
+    const res = await authFetch(`${API_BASE.earnings}/shifts?worker_id=${workerId}`);
+    const data = await res.json();
+    setShifts(res.ok && Array.isArray(data) ? data : []);
   };
 
   useEffect(() => {

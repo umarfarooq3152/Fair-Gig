@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
 import ReactECharts from 'echarts-for-react';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, authFetch } from '@/lib/api';
 
 type Shift = {
   id: string;
@@ -171,7 +171,9 @@ export default function WorkerDashboardPage() {
     setError('');
 
     try {
-      const shiftsRes = await fetch(`${API_BASE.earnings}/shifts?worker_id=${encodeURIComponent(workerId)}`, { cache: 'no-store' });
+      const shiftsRes = await authFetch(
+        `${API_BASE.earnings}/shifts?worker_id=${encodeURIComponent(workerId)}`,
+      );
       const shiftsPayload: unknown = await shiftsRes.json();
       if (!shiftsRes.ok) {
         const message = typeof shiftsPayload === 'object' && shiftsPayload !== null && 'detail' in shiftsPayload
@@ -199,14 +201,15 @@ export default function WorkerDashboardPage() {
         }))
         .filter((row) => Boolean(asDate(row.shift_date)));
 
-      const [anomalyRes, medianResV1, medianResV2] = await Promise.all([
+      const [anomalyRes, medianRes] = await Promise.all([
         fetch(`${API_BASE.anomaly}/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ worker_id: workerId, earnings: earningsForAnomaly }),
         }),
-        fetch(`${API_BASE.analytics}/median/${encodeURIComponent(category)}/${encodeURIComponent(zone)}`, { cache: 'no-store' }),
-        fetch(`${API_BASE.analytics}/analytics/median/${encodeURIComponent(category)}/${encodeURIComponent(zone)}`, { cache: 'no-store' }),
+        authFetch(
+          `${API_BASE.analytics}/analytics/median/${encodeURIComponent(category)}/${encodeURIComponent(zone)}`,
+        ),
       ]);
 
       if (anomalyRes.ok) {
@@ -220,11 +223,11 @@ export default function WorkerDashboardPage() {
       }
 
       let medianValue = 0;
-      const medianResponse = medianResV1.ok ? medianResV1 : medianResV2;
-      if (medianResponse.ok) {
-        const medianPayload: unknown = await medianResponse.json();
-        if (typeof medianPayload === 'object' && medianPayload !== null && 'median_hourly' in medianPayload) {
-          medianValue = Number((medianPayload as { median_hourly?: number }).median_hourly || 0);
+      if (medianRes.ok) {
+        const medianPayload: unknown = await medianRes.json();
+        if (typeof medianPayload === 'object' && medianPayload !== null) {
+          const m = medianPayload as { median_hourly?: number; median_hourly_rate?: number };
+          medianValue = Number(m.median_hourly ?? m.median_hourly_rate ?? 0);
         }
       }
       setMedianHourly(medianValue);

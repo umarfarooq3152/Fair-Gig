@@ -14,7 +14,9 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from psycopg2.extras import RealDictCursor
+from pathlib import Path
 
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
 
 app = FastAPI(title="FairGig Auth Service")
@@ -27,8 +29,11 @@ app.add_middleware(
 )
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey_changeme")
+JWT_SECRET = os.getenv("JWT_SECRET")
 ALGORITHM = "HS256"
+
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable is required (set in .env)")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
@@ -81,6 +86,23 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class UserPublic(BaseModel):
+    id: str
+    name: str
+    email: EmailStr
+    role: str
+    city_zone: Optional[str] = None
+    category: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserPublic
+
+
 def get_conn():
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
@@ -126,7 +148,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
                 )
                 user = cur.fetchone()
                 if not user:
-                    raise HTTPException(status_code=404, detail="User not found")
+                    raise HTTPException(status_code=401, detail="User not found")
                 return user
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -165,13 +187,18 @@ def register(payload: RegisterRequest):
         raise HTTPException(status_code=500, detail="Could not register user")
 
 
-@app.post("/auth/login", response_model=TokenResponse)
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "auth-service", "port": 8001}
+
+
+@app.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, role, password_hash
+                SELECT id, name, email, role, password_hash, city_zone, category, created_at
                 FROM auth.users
                 WHERE email = %s
                 """,
@@ -184,7 +211,16 @@ def login(payload: LoginRequest):
 
     access_token = create_token(str(user["id"]), user["role"])
     refresh_token = create_refresh_token(str(user["id"]), user["role"])
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    public = UserPublic(
+        id=str(user["id"]),
+        name=user["name"],
+        email=user["email"],
+        role=user["role"],
+        city_zone=user.get("city_zone"),
+        category=user.get("category"),
+        created_at=user.get("created_at"),
+    )
+    return LoginResponse(access_token=access_token, refresh_token=refresh_token, user=public)
 
 
 @app.post("/auth/refresh", response_model=TokenResponse)
