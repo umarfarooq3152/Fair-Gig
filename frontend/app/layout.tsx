@@ -1,6 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import RoleSidebar from '@/components/role-sidebar';
+import LayoutShell from '@/components/layout-shell';
 
 export const metadata: Metadata = {
   title: 'FairGig',
@@ -11,10 +11,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <div className="flex min-h-screen">
-          <RoleSidebar />
-          <main className="flex-1 p-6">{children}</main>
-        </div>
+        <LayoutShell>{children}</LayoutShell>
       </body>
     </html>
   );

@@ -20,7 +20,7 @@ function decodeRoleFromToken(token: string | undefined): string | null {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/_next')) {
+  if (pathname === '/' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/_next')) {
     return NextResponse.next();
   }
 
