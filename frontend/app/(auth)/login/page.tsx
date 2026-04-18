@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_BASE } from '@/lib/api';
 import Link from 'next/link';
@@ -19,18 +19,19 @@ export default function LoginPage() {
   const [email, setEmail] = useState(ROLE_DEMOS.worker.email);
   const [password, setPassword] = useState(ROLE_DEMOS.worker.password);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function applyRolePreset(next: DemoRole) {
-    setRolePreset(next);
-    setEmail(ROLE_DEMOS[next].email);
-    setPassword(ROLE_DEMOS[next].password);
-  }
+  useEffect(() => {
+    router.prefetch('/dashboard');
+    router.prefetch('/queue');
+    router.prefetch('/advocate/analytics');
+  }, [router]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError('');
-    setLoading(true);
+    setIsSubmitting(true);
 
     try {
       const response = await fetch(`${API_BASE.auth}/auth/login`, {
@@ -41,7 +42,7 @@ export default function LoginPage() {
 
       if (!response.ok) {
         setError('Invalid credentials');
-        setLoading(false);
+        setIsSubmitting(false);
         return;
       }
 
@@ -86,8 +87,7 @@ export default function LoginPage() {
     } catch (err) {
       console.error(err);
       setError('Network error: Unable to connect to the authentication service.');
-    } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -130,11 +130,18 @@ export default function LoginPage() {
           </div>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <button
-            className="h-14 w-full bg-slate-900 text-[11px] font-black uppercase tracking-widest text-white hover:bg-slate-800 disabled:opacity-60"
+            className="flex h-14 w-full items-center justify-center gap-2 bg-slate-900 text-[11px] font-black uppercase tracking-widest text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
             type="submit"
-            disabled={loading}
+            disabled={isSubmitting}
           >
-            {loading ? 'Signing in…' : 'Sign In'}
+            {isSubmitting ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Signing In...
+              </>
+            ) : (
+              'Sign In'
+            )}
           </button>
         </form>
         <div className="mt-8 border-t-2 border-slate-100 pt-6 text-center text-sm text-slate-500">
