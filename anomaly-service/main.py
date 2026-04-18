@@ -42,4 +42,3 @@ def analyze(request: AnalyzeRequest):
         risk_score=risk_score,
         summary=summary
     )
-    if len(earnings) < 3:

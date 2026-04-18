@@ -30,6 +30,15 @@ export default function WorkerEarnings({ workerId }: Props) {
   const [csvRows, setCsvRows] = useState<CsvDraftRow[]>([]);
   const [csvBusy, setCsvBusy] = useState(false);
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    platform: 'Careem',
+    shift_date: '',
+    hours_worked: '0',
+    gross_earned: '0',
+    platform_deductions: '0',
+    notes: '',
+  });
   const [form, setForm] = useState({
     platform: 'Careem',
     shift_date: new Date().toISOString().slice(0, 10),
@@ -371,6 +380,91 @@ export default function WorkerEarnings({ workerId }: Props) {
     await loadShifts();
   }
 
+  function beginEdit(shift: Shift) {
+    setError('');
+    setSuccess('');
+    setEditingShiftId(shift.id);
+    setEditForm({
+      platform: shift.platform,
+      shift_date: shift.shift_date,
+      hours_worked: String(shift.hours_worked),
+      gross_earned: String(shift.gross_earned),
+      platform_deductions: String(shift.platform_deductions),
+      notes: shift.notes || '',
+    });
+  }
+
+  function cancelEdit() {
+    setEditingShiftId(null);
+  }
+
+  async function saveEdit() {
+    if (!editingShiftId) return;
+
+    setError('');
+    setSuccess('');
+
+    const gross = Number(editForm.gross_earned);
+    const deductions = Number(editForm.platform_deductions);
+    const hours = Number(editForm.hours_worked);
+    const netReceived = Number((gross - deductions).toFixed(2));
+
+    if (!Number.isFinite(hours) || hours <= 0) {
+      setError('Hours must be greater than 0');
+      return;
+    }
+    if (!Number.isFinite(gross) || gross < 0 || !Number.isFinite(deductions) || deductions < 0) {
+      setError('Gross and deductions must be non-negative numbers');
+      return;
+    }
+
+    const { response, payload } = await fetchWithFallback(earningsBases, `/${editingShiftId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        worker_id: workerId,
+        platform: editForm.platform,
+        shift_date: editForm.shift_date,
+        hours_worked: hours,
+        gross_earned: gross,
+        platform_deductions: deductions,
+        net_received: netReceived,
+        notes: editForm.notes || null,
+      }),
+    });
+
+    if (!response.ok) {
+      setError(getErrorMessage(payload, 'Could not update shift. Only pending shifts can be edited.'));
+      return;
+    }
+
+    setSuccess('Pending earning updated successfully');
+    setEditingShiftId(null);
+    await loadShifts();
+  }
+
+  async function deleteShift(shiftId: string) {
+    setError('');
+    setSuccess('');
+
+    const { response, payload } = await fetchWithFallback(earningsBases, `/${shiftId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ worker_id: workerId }),
+    });
+
+    if (!response.ok) {
+      setError(getErrorMessage(payload, 'Could not delete shift. Only pending shifts can be deleted.'));
+      return;
+    }
+
+    if (editingShiftId === shiftId) {
+      setEditingShiftId(null);
+    }
+    setSuccess('Pending earning deleted successfully');
+    await loadShifts();
+  }
+
   return (
     <section className="grid gap-6 lg:grid-cols-2">
       <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -512,15 +606,41 @@ export default function WorkerEarnings({ workerId }: Props) {
         {loading ? <p className="text-sm text-slate-600">Loading...</p> : shifts.length === 0 ? <p className="text-sm text-slate-600">No shifts yet.</p> : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead><tr className="text-left text-slate-500"><th className="px-2 py-2">Date</th><th className="px-2 py-2">Platform</th><th className="px-2 py-2">Hours</th><th className="px-2 py-2">Net</th><th className="px-2 py-2">Status</th></tr></thead>
+              <thead><tr className="text-left text-slate-500"><th className="px-2 py-2">Date</th><th className="px-2 py-2">Platform</th><th className="px-2 py-2">Hours</th><th className="px-2 py-2">Net</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Actions</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {shifts.slice(0, 15).map((shift) => (
                   <tr key={shift.id}>
-                    <td className="px-2 py-2">{shift.shift_date}</td>
-                    <td className="px-2 py-2">{shift.platform}</td>
-                    <td className="px-2 py-2">{shift.hours_worked}</td>
-                    <td className="px-2 py-2">PKR {Number(shift.net_received).toFixed(2)}</td>
+                    <td className="px-2 py-2">{editingShiftId === shift.id ? <input className="w-36 rounded border border-slate-300 px-2 py-1 text-xs" type="date" value={editForm.shift_date} onChange={(e) => setEditForm((prev) => ({ ...prev, shift_date: e.target.value }))} /> : shift.shift_date}</td>
+                    <td className="px-2 py-2">{editingShiftId === shift.id ? <select className="rounded border border-slate-300 px-2 py-1 text-xs" value={editForm.platform} onChange={(e) => setEditForm((prev) => ({ ...prev, platform: e.target.value }))}>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select> : shift.platform}</td>
+                    <td className="px-2 py-2">{editingShiftId === shift.id ? <input className="w-20 rounded border border-slate-300 px-2 py-1 text-xs" type="number" step="0.1" min="0.1" value={editForm.hours_worked} onChange={(e) => setEditForm((prev) => ({ ...prev, hours_worked: e.target.value }))} /> : shift.hours_worked}</td>
+                    <td className="px-2 py-2">{editingShiftId === shift.id ? (
+                      <div className="flex items-center gap-2">
+                        <input className="w-24 rounded border border-slate-300 px-2 py-1 text-xs" type="number" step="0.01" min="0" value={editForm.gross_earned} onChange={(e) => setEditForm((prev) => ({ ...prev, gross_earned: e.target.value }))} />
+                        <span className="text-xs text-slate-400">-</span>
+                        <input className="w-24 rounded border border-slate-300 px-2 py-1 text-xs" type="number" step="0.01" min="0" value={editForm.platform_deductions} onChange={(e) => setEditForm((prev) => ({ ...prev, platform_deductions: e.target.value }))} />
+                        <span className="text-xs font-semibold text-emerald-700">= {Math.max(0, Number(editForm.gross_earned || 0) - Number(editForm.platform_deductions || 0)).toFixed(2)}</span>
+                      </div>
+                    ) : (
+                      `PKR ${Number(shift.net_received).toFixed(2)}`
+                    )}</td>
                     <td className="px-2 py-2 capitalize">{shift.verification_status}</td>
+                    <td className="px-2 py-2">
+                      {shift.verification_status === 'pending' ? (
+                        editingShiftId === shift.id ? (
+                          <div className="flex gap-2">
+                            <button type="button" className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white" onClick={() => void saveEdit()}>Save</button>
+                            <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700" onClick={cancelEdit}>Cancel</button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <button type="button" className="rounded bg-slate-900 px-2 py-1 text-xs font-semibold text-white" onClick={() => beginEdit(shift)}>Edit</button>
+                            <button type="button" className="rounded bg-rose-600 px-2 py-1 text-xs font-semibold text-white" onClick={() => void deleteShift(shift.id)}>Delete</button>
+                          </div>
+                        )
+                      ) : (
+                        <span className="text-xs text-slate-400">Locked after review</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
