@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const roleRoutes: Record<string, string[]> = {
-  worker: ['/dashboard', '/shifts', '/certificate', '/community'],
-  verifier: ['/queue', '/verifier'],
-  advocate: ['/advocate', '/community'],
+  worker: ['/dashboard', '/shifts', '/certificate', '/community', '/settings'],
+  verifier: ['/queue', '/verifier', '/settings'],
+  advocate: ['/advocate', '/community', '/settings'],
 };
 
 function decodeRoleFromToken(token: string | undefined): string | null {

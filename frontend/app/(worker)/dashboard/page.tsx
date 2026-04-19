@@ -218,7 +218,7 @@ function AnomalyReportPanel({ anomalies, onRun, isAnalyzing, riskScore }: { anom
                   <svg className="h-6 w-6 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white">Continuous AI Monitoring Active</h3>
+                  <h3 className="text-base font-bold text-white">Continuous Monitoring Active</h3>
                   <p className="mt-1 text-sm text-slate-300">FairGig's K-Anonymity engine has successfully processed your last 90 days of ledger entries securely.</p>
                   <p className="mt-1 text-xs text-slate-400">This isolated anomaly was identified using boundary checks and heavily cross-referenced with your city zone median.</p>
                 </div>

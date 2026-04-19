@@ -2,6 +2,87 @@
 
 FairGig is an end-to-end gig worker income transparency and rights platform with role-based workflows across six services.
 
+Manual one-by-one startup guide: `README_MANUAL_SERVICES.md`
+
+## Manual Separate Run (One by One)
+
+Use this when you want to start each backend service manually in separate terminals, then run the full UI on `3000`.
+
+### 0) Install dependencies once (repo root)
+
+```bash
+npm install
+npm install --prefix frontend
+```
+
+For Python services (recommended with venv):
+
+```bash
+python -m venv venv
+venv\Scripts\pip install -r auth-service\requirements.txt -r anomaly-service\requirements.txt -r analytics-service\requirements.txt
+```
+
+### 1) Start services one by one (separate terminals)
+
+Terminal 1 (Auth - 8001):
+
+```bash
+cd auth-service
+uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+Terminal 2 (Earnings - 8002):
+
+```bash
+cd earnings-service
+node index.js
+```
+
+Terminal 3 (Anomaly - 8003):
+
+```bash
+cd anomaly-service
+uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+```
+
+Terminal 4 (Grievance - 8004):
+
+```bash
+cd grievance-service
+node index.js
+```
+
+Terminal 5 (Analytics - 8005):
+
+```bash
+cd analytics-service
+uvicorn main:app --host 0.0.0.0 --port 8005 --reload
+```
+
+Terminal 6 (Certificate Renderer - 8006):
+
+```bash
+cd certificate-renderer
+npm install
+npm start
+```
+
+### 2) Run full app (frontend) on port 3000
+
+Terminal 7:
+
+```bash
+npm run dev:frontend
+```
+
+Open: `http://localhost:3000`
+
+### Quick checks
+
+- Auth health: `http://127.0.0.1:8001/health`
+- Frontend: `http://localhost:3000`
+- FastAPI docs: `http://localhost:8001/docs`, `http://localhost:8003/docs`, `http://localhost:8005/docs`
+
 ## Service Stack
 
 - Frontend (Next.js 15): `3000`

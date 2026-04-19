@@ -137,7 +137,8 @@ export default function CertificatePage() {
     return `CERT-${profile.id.substring(0, 8).toUpperCase()}-${safeFrom}-${safeTo}`;
   }, [profile.id, from, to]);
 
-  const verifyUrl = typeof window !== 'undefined' ? `${window.location.origin}/verify/${verificationId}` : '';
+  const verifyBaseUrl = 'http://173.234.137.51:3000';
+  const verifyUrl = verificationId ? `${verifyBaseUrl}/verify/${verificationId}` : '';
 
   if (loading) {
     return (
