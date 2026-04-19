@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -6,65 +6,141 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-sans: 'Inter', sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
-    
-    /* Blueprint Theme Palette */
-    --color-paper: #F8F8F7;
-    --color-ink: #141414;
-    --color-blueprint: #00D1FF;
-    --color-mint-500: #10B981;
-    --color-border: rgba(20, 20, 20, 0.1);
-    --color-border-subtle: rgba(20, 20, 20, 0.08);
-
-    --radius-none: 0;
-    --radius-sm: 2px;
-    --radius-md: 4px;
-    --radius-lg: 8px;
+    --font-heading: 'Poppins', sans-serif;
+    --font-sans: 'Poppins', sans-serif;
+    --color-slate-950: #1a1a1a;
+    --color-slate-900: #262626;
+    --color-slate-800: #404040;
+    --color-slate-200: #e5e5e5;
+    --color-slate-100: #f5f5f5;
+    --color-slate-50: #fafafa;
+    --color-mint-500: #00d1ff; /* Teal accent */
+    --color-mint-600: #00b8e6;
+    --color-brand: #00d1ff;
+    --color-border-subtle: #e2e8f0;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+    --animate-shimmer-slide: shimmer-slide var(--speed) ease-in-out infinite alternate;
+    --animate-spin-around: spin-around calc(var(--speed) * 2) infinite linear;
+    --animate-spotlight: spotlight 2s ease .75s 1 forwards;
+  @keyframes spotlight {
+    0% {
+      opacity: 0;
+      transform: translate(-72%, -62%) scale(0.5);
+    }
+    100% {
+      opacity: 1;
+      transform: translate(-50%,-40%) scale(1);
+    }
+  }
+  @keyframes shimmer-slide {
+  to {
+    transform: translate(calc(100cqw - 100%), 0);
+        }
+    }
+  @keyframes spin-around {
+  0% {
+    transform: translateZ(0) rotate(0);
+        }
+  15%, 35% {
+    transform: translateZ(0) rotate(90deg);
+        }
+  65%, 85% {
+    transform: translateZ(0) rotate(270deg);
+        }
+  100% {
+    transform: translateZ(0) rotate(360deg);
+        }
+    }
 }
 
 :root {
-    --background: #F8F8F7;
-    --foreground: #141414;
-    --primary: #141414;
-    --primary-foreground: #F8F8F7;
-    --border: rgba(20, 20, 20, 0.1);
-    --radius: 0rem; /* Sharp edges for architectural feel */
+    --background: #ffffff;
+    --foreground: #020617;
+    --card: #ffffff;
+    --card-foreground: #1e293b;
+    --popover: #ffffff;
+    --popover-foreground: #1e293b;
+    --primary: #00d1ff;
+    --primary-foreground: #ffffff;
+    --secondary: #0f172a;
+    --secondary-foreground: #ffffff;
+    --muted: #f8fafc;
+    --muted-foreground: #64748b;
+    --accent: #f1f5f9;
+    --accent-foreground: #0f172a;
+    --destructive: #ef4444;
+    --border: #e2e8f0;
+    --input: #e2e8f0;
+    --ring: #00d1ff;
+    --radius: 0.75rem;
+}
+
+.dark {
+    --background: #0f172a;
+    --foreground: #f8fafc;
+    --card: #1e293b;
+    --card-foreground: #f8fafc;
+    --popover: #1e293b;
+    --popover-foreground: #f8fafc;
+    --primary: #00d1ff;
+    --primary-foreground: #0f172a;
+    --secondary: #ffffff;
+    --secondary-foreground: #0f172a;
+    --muted: #334155;
+    --muted-foreground: #94a3b8;
+    --accent: #334155;
+    --accent-foreground: #ffffff;
+    --destructive: #ef4444;
+    --border: #334155;
+    --input: #334155;
+    --ring: #00d1ff;
 }
 
 @layer base {
   * {
-    @apply border-border;
+    @apply border-border outline-ring/50;
     }
   body {
-    @apply bg-paper text-ink selection:bg-blueprint/30;
-    font-feature-settings: "ss01", "ss02", "cv01", "cv02";
+    @apply bg-background text-foreground;
     }
-}
-
-@layer components {
-  /* Architectural Grid Utilities */
-  .grid-divider-v { @apply border-r border-ink/10; }
-  .grid-divider-h { @apply border-b border-ink/10; }
-
-  .blueprint-surface {
-    @apply bg-white border border-ink/10;
-  }
-
-  .rail-text {
-    writing-mode: vertical-rl;
-    @apply uppercase tracking-[0.3em] text-[10px] font-black text-ink/30;
-  }
-}
-
-/* Custom Typography for Editorial Impact */
-.text-huge {
-  font-size: clamp(3.5rem, 12vw, 8.5rem);
-  line-height: 0.88;
-  letter-spacing: -0.04em;
-  font-weight: 900;
-}
-
-.mono-label {
-  @apply font-mono text-[10px] uppercase tracking-widest text-ink/40;
+  html {
+    @apply font-sans scroll-smooth;
+    }
 }

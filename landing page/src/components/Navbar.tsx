@@ -8,100 +8,114 @@ export function Navbar() {
   const [isOpen, setIsOpen] = React.useState(false);
 
   const links = [
-    { name: "Protocol", href: "#features" },
+    { name: "Platform", href: "#features" },
+    { name: "Transparency", href: "#transparency" },
     { name: "Verification", href: "#certificate" },
-    { name: "Data Layers", href: "#transparency" },
-    { name: "Policy", href: "#advocacy" },
+    { name: "Advocacy", href: "#advocacy" },
   ];
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-ink/10 bg-paper/80 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-[1440px] items-stretch justify-between px-4 lg:px-0">
-        {/* Brand Block */}
-        <div className="flex cursor-pointer items-center gap-3 bg-white/50 px-4 grid-divider-v group lg:px-8">
-          <div className="relative z-10 flex h-7 w-7 items-center justify-center rounded-none bg-ink">
-             <ShieldCheck className="h-4 w-4 text-paper" />
+    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-md">
+      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 lg:px-12">
+        <div className="flex items-center gap-3 relative group cursor-pointer shrink-0">
+          <Spotlight 
+            className="-top-20 left-0 scale-[1.5] pointer-events-none opacity-0 group-hover:opacity-10 transition-opacity duration-1000" 
+            fill="#8B5CF6" 
+          />
+          <div className="h-7 w-7 rounded bg-slate-900 flex items-center justify-center relative z-10 shadow-lg group-hover:shadow-purple-500/10 transition-all duration-500">
+             <ShieldCheck className="h-4 w-4 text-white" />
           </div>
-          <span className="text-lg font-black tracking-tighter text-ink uppercase">
-            Fair<span className="text-ink/30 font-medium tracking-tight">Gig</span>
+          <span className="text-xl font-black tracking-tighter text-slate-900 uppercase relative z-10 group-hover:text-purple-600 transition-colors duration-500">
+            Fair<span className="text-slate-400 group-hover:text-purple-300 font-medium tracking-tight transition-colors duration-500">Gig</span>
           </span>
         </div>
         
-        {/* Navigation Grid */}
-        <div className="hidden items-stretch lg:flex flex-1">
+        <div className="hidden items-center gap-12 lg:flex">
           {links.map((link) => (
-            <a 
-              key={link.name} 
-              href={link.href} 
-              className="relative flex items-center px-6 text-[9px] font-black text-ink/40 uppercase tracking-[0.2em] transition-all duration-300 hover:text-ink hover:bg-white grid-divider-v group/nav"
-            >
-              <span className="relative z-10">{link.name}</span>
-              <span className="absolute bottom-0 left-0 h-0.5 w-0 bg-blueprint transition-all duration-300 group-hover/nav:w-full" />
-            </a>
+            <div key={link.name} className="relative group/nav overflow-visible flex items-center">
+              <a 
+                href={link.href} 
+                className="relative z-10 block text-[11px] font-[800] text-slate-500 uppercase tracking-[0.2em] transition-all duration-300 hover:text-slate-900"
+              >
+                {link.name}
+                <span className="absolute -bottom-1.5 left-0 h-[1.5px] w-0 bg-purple-500 transition-all duration-300 group-hover/nav:w-full" />
+              </a>
+            </div>
           ))}
         </div>
 
-        {/* Action Block */}
-        <div className="flex items-stretch">
-          <div className="hidden md:flex items-center gap-5 px-6 grid-divider-v">
-             <Github className="h-4 w-4 text-ink/20 hover:text-ink cursor-pointer transition-colors" />
-             <Twitter className="h-4 w-4 text-ink/20 hover:text-ink cursor-pointer transition-colors" />
+        <div className="flex items-center gap-4 lg:gap-8">
+          <div className="hidden md:flex items-center gap-5 text-slate-400">
+             <Github className="h-5 w-5 hover:text-slate-900 cursor-pointer transition-colors" />
+             <Twitter className="h-5 w-5 hover:text-slate-900 cursor-pointer transition-colors" />
           </div>
-          
-          <div className="flex items-center gap-0">
+          <div className="h-6 w-px bg-slate-200 hidden md:block" />
+          <div className="hidden sm:flex items-center gap-6">
             <a 
-              href="/login" 
-              className="hidden sm:flex h-full items-center px-6 text-[9px] font-black uppercase tracking-[0.18em] text-ink/40 hover:text-ink hover:bg-white grid-divider-v transition-colors"
+              href="#signin" 
+              className={cn(
+                buttonVariants({ variant: "ghost" }), 
+                "text-[11px] font-black uppercase tracking-[0.2em] text-slate-900 hover:bg-transparent hover:text-mint-500 px-0 transition-colors cursor-pointer"
+              )}
             >
-               Login
+               Sign In
             </a>
             <a 
-              href="/register" 
-              className="flex h-full items-center px-7 text-[9px] font-black uppercase tracking-[0.18em] bg-ink text-paper hover:bg-blueprint hover:text-ink transition-all"
+              href="#signin" 
+              className={cn(
+                buttonVariants({ variant: "default" }), 
+                "bg-slate-900 text-white rounded-none h-11 px-8 text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-800 transition-all shadow-lg hover:shadow-slate-900/10 cursor-pointer"
+              )}
             >
-               Register
+               Get Started
             </a>
           </div>
 
           {/* Mobile Menu Toggle */}
           <button 
-            className="p-3 text-ink transition-colors hover:bg-white lg:hidden"
+            className="lg:hidden p-2 text-slate-900 hover:bg-slate-50 transition-colors"
             onClick={() => setIsOpen(!isOpen)}
           >
-            {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </button>
         </div>
       </div>
 
       {/* Mobile Menu Overlay */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-16 bg-paper border-b border-ink/10 p-6 lg:hidden animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="absolute top-20 left-0 right-0 bg-white border-b border-slate-200 p-8 lg:hidden animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="flex flex-col gap-6">
             {links.map((link) => (
               <a 
                 key={link.name}
                 href={link.href}
                 onClick={() => setIsOpen(false)}
-                className="text-[12px] font-black uppercase tracking-widest text-ink/40 hover:text-blueprint transition-colors"
+                className="text-[12px] font-black uppercase tracking-widest text-slate-900 hover:text-purple-600 transition-colors"
               >
                 {link.name}
               </a>
             ))}
-            <div className="h-px w-full bg-ink/10 my-2" />
+            <div className="h-px w-full bg-slate-100 my-2" />
             <div className="flex flex-col gap-4">
               <a 
-                href="/login" 
+                href="#signin" 
                 onClick={() => setIsOpen(false)}
-                className="w-full h-14 flex items-center justify-center text-[11px] font-black uppercase tracking-widest border border-ink/20 hover:bg-white"
+                className={cn(
+                  buttonVariants({ variant: "outline" }),
+                  "w-full h-12 rounded-none text-[12px] font-black uppercase tracking-widest border-2"
+                )}
               >
-                Login
+                Sign In
               </a>
               <a 
-                href="/register" 
+                href="#signin" 
                 onClick={() => setIsOpen(false)}
-                className="w-full h-14 flex items-center justify-center text-[11px] font-black uppercase tracking-widest bg-ink text-paper"
+                className={cn(
+                  buttonVariants({ variant: "default" }),
+                  "w-full h-12 rounded-none text-[12px] font-black uppercase tracking-widest bg-slate-900 text-white"
+                )}
               >
-                Register
+                Get Started
               </a>
             </div>
           </div>

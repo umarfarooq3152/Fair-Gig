@@ -59,21 +59,10 @@ function resolvePython(): string {
   const winVenv = path.join(repoRoot, 'venv', 'Scripts', 'python.exe');
   const unixVenv = path.join(repoRoot, 'venv', 'bin', 'python3');
   const unixVenvAlt = path.join(repoRoot, 'venv', 'bin', 'python');
-  const dotUnixVenv = path.join(repoRoot, '.venv', 'bin', 'python3');
-  const dotUnixVenvAlt = path.join(repoRoot, '.venv', 'bin', 'python');
 
-  if (isWindows) {
-    if (fs.existsSync(winVenv)) return winVenv;
-  } else {
-    if (fs.existsSync(unixVenv)) return unixVenv;
-    if (fs.existsSync(unixVenvAlt)) return unixVenvAlt;
-    if (fs.existsSync(dotUnixVenv)) return dotUnixVenv;
-    if (fs.existsSync(dotUnixVenvAlt)) return dotUnixVenvAlt;
-  }
-
+  if (fs.existsSync(winVenv)) return winVenv;
   if (fs.existsSync(unixVenv)) return unixVenv;
   if (fs.existsSync(unixVenvAlt)) return unixVenvAlt;
-  if (fs.existsSync(winVenv)) return winVenv;
 
   return isWindows ? 'python' : 'python3';
 }

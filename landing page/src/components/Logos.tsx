@@ -6,33 +6,38 @@ export function Logos() {
     "InDrive", "Careem", "DoorDash", "Instacart", "Daraz", "TaskRabbit"
   ];
 
+  // Duplicate for infinite loop
   const duplicatedPlatforms = [...platforms, ...platforms, ...platforms];
 
   return (
-    <section className="bg-white border-b border-ink/10 py-12 overflow-hidden relative">
-      <div className="absolute left-1/2 -translate-x-1/2 top-0 -translate-y-1/2 bg-white px-4 z-20">
-        <span className="mono-label !text-blueprint">Verified Ingress Sources</span>
+    <section id="transparency" className="bg-white py-14 border-b border-slate-100 overflow-hidden relative">
+      <div className="mx-auto max-w-7xl px-6 lg:px-12 mb-10">
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-300 text-center">
+          Infrastructuring Global & Local Income Streams
+        </p>
       </div>
-      
+
       <div className="relative flex overflow-hidden group">
+        <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none" />
+        <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none" />
+
         <motion.div
            animate={{
              x: ["0%", "-33.33%"],
            }}
            transition={{
-             duration: 40,
+             duration: 30, // Slightly faster for text ticker
              repeat: Infinity,
              ease: "linear",
            }}
-           className="flex items-center gap-16 lg:gap-32 whitespace-nowrap min-w-max px-16"
+           className="flex items-center gap-12 lg:gap-24 whitespace-nowrap min-w-max px-8"
         >
           {duplicatedPlatforms.map((name, i) => (
             <div
               key={i}
-              className="flex items-center gap-4 opacity-20 hover:opacity-100 transition-all duration-700 cursor-pointer grayscale hover:grayscale-0"
+              className="flex items-center justify-center opacity-30 hover:opacity-100 transition-all duration-500 cursor-pointer"
             >
-              <div className="h-2 w-2 bg-ink/10 hover:bg-blueprint transition-colors" />
-              <span className="text-2xl lg:text-3xl font-black text-ink tracking-tighter uppercase italic">
+              <span className="text-[14px] font-[800] uppercase tracking-[0.25em] text-slate-900 hover:text-mint-500 transition-colors">
                 {name}
               </span>
             </div>

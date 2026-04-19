@@ -1,6 +1,5 @@
 import React from "react";
 import { motion } from "motion/react";
-import { cn } from "@/lib/utils";
 
 const testimonials = [
   {
@@ -31,23 +30,17 @@ const testimonials = [
 
 export function Testimonials() {
   return (
-    <section id="advocacy" className="bg-paper py-24 sm:py-32 border-b border-ink/10 relative overflow-hidden">
-      {/* Structural Accent */}
-      <div className="absolute top-0 right-0 w-1/2 h-full bg-white/30 skew-x-[-20deg] translate-x-1/2 pointer-events-none" />
-
-      <div className="mx-auto max-w-7xl px-6 lg:px-12 relative z-10">
-        <div className="flex flex-col mb-20">
-          <div className="flex items-center gap-4 mb-6">
-            <span className="h-0.5 w-12 bg-blueprint" />
-            <span className="mono-label">Human Consensus</span>
-          </div>
-          <h2 className="text-huge text-ink">
-            Economic <br />
-            <span className="text-ink/20">Mobility.</span>
-          </h2>
+    <section id="advocacy" className="bg-[#F5F5F5] py-24 sm:py-32">
+      <div className="mx-auto max-w-7xl px-8 lg:px-12">
+        <div className="flex flex-col mb-16">
+          <h2 className="text-sm font-black uppercase tracking-[0.3em] text-purple-600 mb-4">Worker Success</h2>
+          <h3 className="text-4xl lg:text-5xl font-black tracking-tighter text-slate-900 leading-none">
+            Proven Results in the <br />
+            Real Economy.
+          </h3>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-0 border border-ink/10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {testimonials.map((t, i) => (
             <motion.div
               key={i}
@@ -55,38 +48,36 @@ export function Testimonials() {
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: i * 0.1 }}
               viewport={{ once: true }}
-              className={cn(
-                "flex flex-col p-10 bg-white hover:bg-paper transition-colors duration-500",
-                i < testimonials.length - 1 && "md:grid-divider-v",
-                i > 0 && "border-t border-ink/10 md:border-t-0"
-              )}
+              className={`relative flex flex-col h-full rounded-[40px] p-10 bg-gradient-to-br ${t.gradient} border border-white/50 shadow-sm overflow-hidden`}
             >
+              {/* Card Content */}
               <div className="flex items-center gap-4 mb-10">
                 <img 
                    src={t.avatar} 
                    alt={t.name} 
-                   className="h-12 w-12 rounded-none grayscale group-hover:grayscale-0 transition-all border border-ink/10"
+                   className="h-14 w-14 rounded-full border-2 border-white shadow-md object-cover"
                    referrerPolicy="no-referrer"
                 />
                 <div className="flex flex-col">
-                  <span className="text-[11px] font-black text-ink uppercase tracking-wider leading-none mb-1">{t.name}</span>
-                  <span className="mono-label text-[8px] leading-none">{t.role}</span>
+                  <span className="text-[13px] font-black text-slate-900 uppercase tracking-wide">{t.name}</span>
+                  <span className="text-[10px] font-medium text-slate-500 uppercase tracking-widest">{t.role}</span>
                 </div>
               </div>
 
-              <blockquote className="flex-1 mb-10">
-                <p className="text-[20px] font-bold text-ink leading-tight tracking-tight">
+              <blockquote className="flex-1">
+                <p className="text-[22px] font-bold text-slate-800 leading-tight tracking-tight mb-8">
                   &ldquo;{t.quote}&rdquo;
                 </p>
               </blockquote>
 
-              <div className="flex justify-between items-center">
-                <div className="inline-flex items-center gap-3">
-                   <div className="h-1.5 w-1.5 rounded-full bg-blueprint" />
-                   <span className="mono-label !text-ink/80">{t.platform}</span>
+              <div className="mt-auto">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/40 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 backdrop-blur-sm border border-white/50">
+                   {t.platform}
                 </div>
-                <div className="h-4 w-4 border-r border-b border-ink/10" />
               </div>
+
+              {/* Decorative Subtle Fade at bottom */}
+              <div className="absolute -bottom-10 -right-10 h-32 w-32 bg-white/20 rounded-full blur-3xl" />
             </motion.div>
           ))}
         </div>
