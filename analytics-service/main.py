@@ -300,10 +300,19 @@ def median_hourly(category: str, zone: str):
                   AND s.shift_date >= NOW() - INTERVAL '30 days'
                   AND s.verification_status = 'verified'
                   AND s.hours_worked > 0
+                HAVING COUNT(DISTINCT u.id) >= 5
                 """,
                 (zone, category),
             )
             row = cur.fetchone()
+            if not row:
+                return {
+                    "median_hourly_rate": 0,
+                    "median_hourly": 0,
+                    "sample_size": 0,
+                    "category": category,
+                    "zone": zone,
+                }
             med = float(row["median_hourly"] or 0)
             n = int(row["sample_size"] or 0)
             return {
@@ -332,3 +341,84 @@ def top_complaints():
                 """
             )
             return cur.fetchall()
+
+@app.get("/analytics/verifier-queue")
+def verifier_queue():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM analytics.v_verifier_queue")
+            return cur.fetchall()
+
+@app.get("/analytics/city-zone-medians")
+def city_zone_medians(zone: Optional[str] = Query(default=None), category: Optional[str] = Query(default=None)):
+    query = "SELECT * FROM analytics.v_city_zone_medians"
+    conditions = []
+    values = []
+    if zone:
+        conditions.append("city_zone = %s")
+        values.append(zone)
+    if category:
+        conditions.append("category = %s")
+        values.append(category)
+    
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY month DESC"
+    
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(values))
+            return cur.fetchall()
+
+@app.get("/analytics/anomaly-logs")
+def anomaly_logs(worker_id: Optional[str] = Query(default=None)):
+    query = "SELECT * FROM analytics.anomaly_logs"
+    conditions = []
+    values = []
+    if worker_id:
+        conditions.append("worker_id = %s")
+        values.append(worker_id)
+        
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY detected_at DESC LIMIT 100"
+    
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(values))
+            return cur.fetchall()
+
+@app.get("/analytics/commission-snapshots")
+def commission_snapshots(platform: Optional[str] = Query(default=None)):
+    query = "SELECT * FROM analytics.commission_snapshots"
+    conditions = []
+    values = []
+    if platform:
+        conditions.append("platform = %s")
+        values.append(platform)
+        
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY snapshot_month DESC"
+    
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(values))
+            return cur.fetchall()
+
+@app.get("/analytics/collective-count")
+def collective_count(platform: str = Query(...), anomaly_type: str = Query(...), month: str = Query(...)):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT worker_id)::int AS count
+                FROM analytics.anomaly_logs
+                WHERE platform = %s
+                  AND anomaly_type::TEXT = %s
+                  AND affected_date LIKE %s
+                """,
+                (platform, anomaly_type, month + "%")
+            )
+            row = cur.fetchone()
+            return {"count": int(row["count"] or 0) if row else 0}

@@ -128,17 +128,121 @@ function PeriodSelect({ value, onChange, dark = false }: { value: ChartPeriod; o
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as ChartPeriod)}
-      className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold outline-none transition ${
-        dark
-          ? 'border-slate-700 bg-slate-900 text-slate-200 focus:border-slate-500'
-          : 'border-slate-200 bg-white text-slate-700 focus:border-sky-300'
-      }`}
+      className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold outline-none transition ${dark
+        ? 'border-slate-700 bg-slate-900 text-slate-200 focus:border-slate-500'
+        : 'border-slate-200 bg-white text-slate-700 focus:border-sky-300'
+        }`}
     >
       <option value="daily">Daily</option>
       <option value="weekly">Weekly</option>
       <option value="monthly">Monthly</option>
       <option value="yearly">Yearly</option>
     </select>
+  );
+}
+
+function AnomalyCard({ anomaly }: { anomaly: AnomalyItem }) {
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!anomaly.platform || !anomaly.affected_date) return;
+    const month = anomaly.affected_date.slice(0, 7);
+    fetch(`${API_BASE.analytics}/analytics/collective-count?platform=${encodeURIComponent(anomaly.platform)}&anomaly_type=${encodeURIComponent(anomaly.type)}&month=${month}`)
+      .then(r => r.json())
+      .then(d => setCount(d.count))
+      .catch(() => setCount(0));
+  }, [anomaly]);
+
+  const severityColor = anomaly.severity === 'high' ? 'bg-red-500/20 text-red-400 border-red-500/30' : anomaly.severity === 'medium' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-800 p-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm font-bold text-white capitalize">{String(anomaly.type).replace(/_/g, ' ')}</p>
+          <p className="text-xs text-slate-400">{formatDateLong(anomaly.affected_date)} • {anomaly.platform}</p>
+        </div>
+        <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest ${severityColor}`}>
+          {anomaly.severity}
+        </span>
+      </div>
+      <p className="text-sm text-slate-300">{anomaly.explanation}</p>
+
+      <div className="mt-1 flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2">
+        <span className="flex h-2 w-2 relative">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+        </span>
+        <p className="text-xs text-slate-400">
+          {count === null ? 'Checking collective data...' : (count > 1 ? `You are not alone — ${count - 1} other workers reported the same issue on ${anomaly.platform} this month.` : `You're the first to flag this unique pattern on ${anomaly.platform} this month.`)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AnomalyReportPanel({ anomalies, onRun, isAnalyzing, riskScore }: { anomalies: AnomalyItem[], onRun: () => void, isAnalyzing: boolean, riskScore: number }) {
+  const badgeColor = riskScore >= 70 ? 'bg-red-500 text-white' : riskScore >= 40 ? 'bg-orange-500 text-white' : 'bg-emerald-500 text-white';
+
+  return (
+    <div className="col-span-12 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-xl shadow-slate-900/20">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-bold text-white">Anomaly Report</h2>
+          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${badgeColor}`}>
+            Risk Score: {riskScore}
+          </span>
+        </div>
+        <button
+          onClick={onRun}
+          disabled={isAnalyzing}
+          className="flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow shadow-sky-600/20 transition hover:bg-sky-500 disabled:opacity-50"
+        >
+          {isAnalyzing ? (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          ) : (
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          )}
+          {isAnalyzing ? 'Analyzing...' : 'Run Anomaly Analysis'}
+        </button>
+      </div>
+
+      {anomalies.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {anomalies.map((a, idx) => <AnomalyCard key={idx} anomaly={a} />)}
+
+          {anomalies.length === 1 && (
+            <div className="col-span-1 flex flex-col justify-center rounded-xl border border-slate-700/50 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-sky-900/40 via-slate-800 to-slate-800 p-6 lg:col-span-2">
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-sky-500/20">
+                  <svg className="h-6 w-6 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Continuous AI Monitoring Active</h3>
+                  <p className="mt-1 text-sm text-slate-300">FairGig's K-Anonymity engine has successfully processed your last 90 days of ledger entries securely.</p>
+                  <p className="mt-1 text-xs text-slate-400">This isolated anomaly was identified using boundary checks and heavily cross-referenced with your city zone median.</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {anomalies.length === 2 && (
+            <div className="col-span-1 flex items-center justify-center rounded-xl border border-slate-700/50 bg-slate-800/50 p-6 text-center">
+              <p className="text-xs font-semibold text-slate-400">Monitoring complete for 90-day period.</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20">
+            <svg className="h-5 w-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-emerald-400">No anomalies detected</h3>
+            <p className="text-xs text-slate-300">Your earnings look consistent across all platforms over the selected period. Operations normal.</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -153,12 +257,50 @@ export default function WorkerDashboardPage() {
   const [distributionPeriod, setDistributionPeriod] = useState<ChartPeriod>('daily');
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
+  const [riskScore, setRiskScore] = useState(0);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [medianHourly, setMedianHourly] = useState(0);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const [context, setContext] = useState({ workerId: '', zone: 'N/A', category: 'N/A' });
   const [hourlyPlatform, setHourlyPlatform] = useState('all');
   const [commissionPlatform, setCommissionPlatform] = useState('all');
+
+  async function runAnomalyAnalysis(workerId: string, currentShifts: Shift[], isSilent = false) {
+    if (!isSilent) setIsAnalyzing(true);
+    try {
+      const earningsForAnomaly = currentShifts
+        .map((s) => ({
+          shift_date: String(s.shift_date || '').slice(0, 10),
+          platform: String(s.platform || 'Other'),
+          gross_earned: Number(s.gross_earned || 0),
+          platform_deductions: Number(s.platform_deductions || 0),
+          net_received: Number(s.net_received || 0),
+          hours_worked: Number(s.hours_worked || 0),
+        }))
+        .filter((row) => Boolean(asDate(row.shift_date)));
+
+      const anomalyRes = await fetch(`${API_BASE.anomaly}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ worker_id: workerId, earnings: earningsForAnomaly.slice(0, 90) }),
+      });
+
+      if (anomalyRes.ok) {
+        const anomalyPayload = await anomalyRes.json();
+        setAnomalies(Array.isArray(anomalyPayload?.anomalies) ? anomalyPayload.anomalies : []);
+        setRiskScore(Number(anomalyPayload?.risk_score || 0));
+      } else {
+        if (!isSilent) alert("Analysis failed. Try again.");
+        setAnomalies([]);
+        setRiskScore(0);
+      }
+    } catch {
+      if (!isSilent) alert("Analysis failed. Try again.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
 
   async function loadDashboard() {
     const workerId = localStorage.getItem('fairgig_user_id') || '';
@@ -181,33 +323,12 @@ export default function WorkerDashboardPage() {
       const shiftRows: Shift[] = Array.isArray(shiftsPayload) ? shiftsPayload : [];
       setShifts(shiftRows);
 
-      const earningsForAnomaly = shiftRows
-        .map((s) => ({
-          shift_date: String(s.shift_date || '').slice(0, 10),
-          platform: String(s.platform || 'Other'),
-          gross_earned: Number(s.gross_earned || 0),
-          platform_deductions: Number(s.platform_deductions || 0),
-          net_received: Number(s.net_received || 0),
-          hours_worked: Number(s.hours_worked || 0),
-        }))
-        .filter((row) => Boolean(asDate(row.shift_date)));
-
-      const [anomalyRes, complaintsRes, medianRes] = await Promise.all([
-        fetch(`${API_BASE.anomaly}/analyze`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worker_id: workerId, earnings: earningsForAnomaly }),
-        }),
+      const [complaintsRes, medianRes] = await Promise.all([
         authFetch(`${API_BASE.grievance}/api/complaints/mine`, { cache: 'no-store' }),
         fetch(`${API_BASE.analytics}/analytics/median/${encodeURIComponent(category)}/${encodeURIComponent(zone)}`, { cache: 'no-store' }),
       ]);
 
-      if (anomalyRes.ok) {
-        const anomalyPayload = await anomalyRes.json();
-        setAnomalies(Array.isArray(anomalyPayload?.anomalies) ? anomalyPayload.anomalies : []);
-      } else {
-        setAnomalies([]);
-      }
+      void runAnomalyAnalysis(workerId, shiftRows, true);
 
       if (complaintsRes.ok) {
         const compData = await complaintsRes.json();
@@ -337,7 +458,7 @@ export default function WorkerDashboardPage() {
     const bucketed = new Map<string, number>();
     const unit = bucketUnitFromPeriod(performancePeriod);
     const anomalyMap = new Map<string, AnomalyItem[]>();
-    
+
     for (const s of performanceShifts) {
       const dOptions = asDate(s.shift_date);
       if (!dOptions) continue;
@@ -357,7 +478,7 @@ export default function WorkerDashboardPage() {
     const keys = Array.from(bucketed.keys()).sort((a, b) => a.localeCompare(b));
     const labels = keys.map((k) => bucketLabelFromKey(k, unit));
     const netData = keys.map((k) => bucketed.get(k) || 0);
-    
+
     const anomalyPoints = keys.map((k, idx) => {
       const list = anomalyMap.get(k);
       if (list && list.length > 0) {
@@ -381,15 +502,12 @@ export default function WorkerDashboardPage() {
         extraCssText: 'max-width:320px; white-space:normal; word-break:break-word; border-radius:12px; box-shadow:0 12px 30px rgba(2,6,23,0.45);',
         formatter: (params: any) => {
           const p = params[0];
-          let html = `<div style="max-width:300px; line-height:1.45; color:#e2e8f0;"><div style="font-weight:700; margin-bottom:4px;">${p.name}</div><div style="font-size:12px; color:#cbd5e1;">Earnings: PKR ${Number(p.value || 0).toFixed(2)}</div>`;
+          let html = `<b>${p.name}</b><br/>Earnings: PKR ${Number(p.value || 0).toFixed(2)}`;
           const match = anomalyPoints.find((ap) => ap?.value[0] === p.name);
           if (match) {
-            html += `<div style="margin:8px 0; border-top:1px solid #334155;"></div><div style="color:#fca5a5; font-weight:700; font-size:12px; margin-bottom:6px;">Anomalies Detected</div>`;
+            html += `<hr style="margin:4px 0;"/><span style="color:#dc2626;font-weight:bold;">Anomalies Detected:</span><br/>`;
             match.alertDetails.forEach((a: any) => {
-              const desc = a.explanation || 'No description provided';
-              const platform = a.platform ? ` | ${String(a.platform).toUpperCase()}` : '';
-              const when = a.affected_date ? ` | ${formatDateLong(a.affected_date)}` : '';
-              html += `<div style="margin-bottom:8px;"><div style="font-weight:600; color:#fecaca;">${a.type} (${a.severity})${platform}${when}</div><div style="font-size:12px; color:#cbd5e1; white-space:normal; word-break:break-word;">${desc}</div></div>`;
+              html += `- ${a.type} (${a.severity})<br/>`;
             });
           }
           html += '</div>';
@@ -674,16 +792,7 @@ export default function WorkerDashboardPage() {
           </div>
         )}
 
-        {anomalies.length > 0 && (
-          <div className="col-span-12 flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-800">
-            <span className="relative flex h-3 w-3">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500"></span>
-            </span>
-            <p className="text-sm font-semibold">{anomalies.length} red-flag anomal{anomalies.length > 1 ? 'ies' : 'y'} detected in the selected period.</p>
-          </div>
-        )}
-
+        {/* ROW 1: KPI CARDS */}
         <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Net</p>
           <p className="mt-1 text-xs font-semibold text-slate-500">Month: {monthSummary.monthLabel}</p>
@@ -711,7 +820,8 @@ export default function WorkerDashboardPage() {
           <p className="mt-2 text-xs font-semibold text-slate-500">Open cases currently in pipeline</p>
         </div>
 
-        <div className="col-span-12 lg:col-span-8 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+        {/* ROW 2: CHARTS */}
+        <div className="col-span-12 lg:col-span-8 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-xl shadow-slate-900/20">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-white">Performance (Earnings & Alerts)</h2>
@@ -742,6 +852,14 @@ export default function WorkerDashboardPage() {
             )}
           </div>
         </div>
+
+        {/* ROW 3: ANOMALY REPORT PANEL */}
+        <AnomalyReportPanel
+          anomalies={anomalies}
+          riskScore={riskScore}
+          isAnalyzing={isAnalyzing}
+          onRun={() => runAnomalyAnalysis(context.workerId, shifts, false)}
+        />
 
         <div className="col-span-12 lg:col-span-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">

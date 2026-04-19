@@ -3,3 +3,4 @@ uvicorn
 numpy
 python-dotenv
 scipy
+psycopg2-binary

@@ -105,21 +105,29 @@ async function seed() {
   const passwordHash = await bcrypt.hash('password', 10);
 
   // =========================================================================
-  // TABLE 1: auth.users — 60 workers + 5 verifiers + 5 advocates = 70 users
+  // TABLE 1: auth.users — 100 workers + 5 verifiers + 5 advocates = 110 users
   // =========================================================================
-  console.log('👤 Seeding auth.users (70 users)...');
+  console.log('👤 Seeding auth.users (110 users)...');
   const workerIds: string[] = [];
   const verifierIds: string[] = [];
   const advocateIds: string[] = [];
 
-  for (let i = 0; i < 60; i++) {
-    const zone = sample(CITY_ZONES.slice(0, 5)); // exclude 'Other' for workers
-    const category = sample(CATEGORIES);
+  for (let i = 0; i < 100; i++) {
+    // FORCE demo user (worker1) and 14 decoys into the EXACT same cohort
+    // to absolutely guarantee the City Median Graph passes the k=5 anonymity threshold!
+    let zone = sample(CITY_ZONES.slice(0, 5));
+    let category = sample(CATEGORIES);
+
+    if (i < 15) {
+      zone = 'DHA';
+      category = 'ride_hailing';
+    }
+
     const r = await client.query(
       `INSERT INTO auth.users (name, email, password_hash, role, city_zone, category, phone, bio)
        VALUES ($1, $2, $3, 'worker'::auth.user_role, $4::auth.city_zone, $5::auth.worker_category, $6, $7)
        RETURNING id`,
-      [NAMES[i], `worker${i + 1}@fairgig.demo`, passwordHash, zone, category,
+      [NAMES[i % NAMES.length], `worker${i + 1}@fairgig.demo`, passwordHash, zone, category,
       `+92-${300 + randomInt(0, 99)}-${randomInt(1000000, 9999999)}`,
       `Gig worker in ${zone}, ${category.replace('_', ' ')} sector`],
     );

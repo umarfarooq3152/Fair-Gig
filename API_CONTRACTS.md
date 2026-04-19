@@ -52,6 +52,10 @@ All shift routes require Bearer JWT.
 - `GET /analytics/vulnerability-flags`
 - `GET /analytics/median/{category}/{zone}`
 - `GET /analytics/top-complaints`
+- `GET /analytics/city-zone-medians`
+- `GET /analytics/verifier-queue`
+- `GET /analytics/anomaly-logs`
+- `GET /analytics/commission-snapshots`
 
 ## Frontend env
 
