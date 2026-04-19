@@ -82,14 +82,27 @@ export function Hero() {
       </div>
 
       <div className="relative z-10 w-full">
-        <div className="border-b border-ink/10 py-16 lg:py-24">
-            <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-10 px-6 lg:grid-cols-2 lg:gap-12 lg:px-12">
-              <div className="text-center lg:text-left">
+        {/* Top Header Rail */}
+        <div className="w-full border-b border-ink/10 flex justify-between h-14 items-center px-6 lg:px-12 bg-white/50">
+            <div className="flex items-center gap-6">
+                <span className="mono-label">Protocol v2.0.26</span>
+                <span className="mono-label">Lat: 31.4826 N / Lon: 74.3252 E</span>
+            </div>
+            <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-mint-500 animate-pulse" />
+                    <span className="mono-label text-ink">SOFTEC 2026 Innovation Awards</span>
+                </div>
+            </div>
+        </div>
+
+        <div className="flex flex-col items-center text-center py-20 lg:py-32 border-b border-ink/10">
+            <div className="px-6">
                 <motion.h1 
                   variants={container}
                   initial="hidden"
                   animate="visible"
-                  className="text-ink max-w-[760px] text-[clamp(2.8rem,8.5vw,6.4rem)] leading-[0.9] tracking-[-0.04em] font-black"
+                  className="text-huge text-ink max-w-[1400px]"
                 >
                   {words.map((word, index) => (
                     <motion.span
@@ -109,29 +122,21 @@ export function Hero() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.8, delay: 1.2 }}
-                  className="mt-12 flex flex-col items-center justify-center gap-12 lg:flex-row lg:items-start lg:justify-start"
+                  className="mt-12 flex flex-col lg:flex-row items-center justify-center gap-12"
                 >
-                    <p className="max-w-lg border-l-4 border-blueprint px-4 text-base font-medium leading-relaxed text-ink/60 lg:pl-8 lg:text-left">
+                    <p className="max-w-xl text-lg text-ink/60 leading-relaxed font-medium lg:text-left px-4 border-l-4 border-blueprint lg:pl-8">
                         The standardized protocol to aggregate, verify, and leverage your multi-platform gig earnings. A cryptographically secure data layer for the modern economy.
                     </p>
+                    
+                    <div className="flex flex-col sm:flex-row gap-0 border border-ink overflow-hidden">
+                      <Button size="lg" className="h-16 px-10 text-[12px] font-black uppercase tracking-widest bg-ink text-paper hover:bg-blueprint hover:text-ink rounded-none transition-all">
+                        Get Started
+                      </Button>
+                      <Button variant="ghost" size="lg" className="h-16 px-10 text-[12px] font-black uppercase tracking-widest text-ink hover:bg-white rounded-none border-t sm:border-t-0 sm:border-l border-ink/10">
+                        View Specs
+                      </Button>
+                    </div>
                 </motion.div>
-              </div>
-
-              <motion.div
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.9, delay: 0.8 }}
-                className="relative flex items-end justify-center lg:justify-end"
-              >
-                <div className="pointer-events-none absolute -inset-3 -z-10 rounded-3xl bg-gradient-to-br from-blueprint/15 via-transparent to-mint-500/10 blur-2xl" />
-                <motion.img
-                  src="/hero-workers.png"
-                  alt="Gig workers from multiple platforms"
-                  className="relative z-10 h-auto w-full max-w-[980px] object-contain lg:translate-x-8"
-                  animate={{ y: [0, -8, 0] }}
-                  transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
-                />
-              </motion.div>
             </div>
         </div>
 
