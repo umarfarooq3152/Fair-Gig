@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle2, Expand, Flag, Loader2, X, XCircle } from 'lucide-react';
 import { API_BASE, authFetch } from '@/lib/api';
 
@@ -58,6 +59,7 @@ function resolveImage(url: string | undefined) {
 function imageCandidates(url: string | undefined) {
   const raw = String(url || '').trim();
   if (!raw || raw === 'null' || raw === 'undefined') return [];
+  if (raw.startsWith('/uploads/') || raw.includes('earnings-service/uploads/')) return [];
 
   const base = API_BASE.earnings.replace(/\/$/, '');
   const candidates: string[] = [];
@@ -137,6 +139,7 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
 }
 
 export default function VerifierQueuePage() {
+  const [mounted, setMounted] = useState(false);
   const [items, setItems] = useState<QueueShift[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -146,8 +149,7 @@ export default function VerifierQueuePage() {
   const [toDate, setToDate] = useState('');
   const [submittingId, setSubmittingId] = useState('');
   const [submittingStatus, setSubmittingStatus] = useState<DecisionStatus | ''>('');
-  const [previewImages, setPreviewImages] = useState<string[]>([]);
-  const [previewIndex, setPreviewIndex] = useState(0);
+  const [screenshotPreviewUrl, setScreenshotPreviewUrl] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
@@ -155,6 +157,10 @@ export default function VerifierQueuePage() {
   const pushToast = (kind: ToastKind, message: string) => {
     setToast({ id: Date.now(), kind, message });
   };
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -254,21 +260,17 @@ export default function VerifierQueuePage() {
   };
 
   const openPreview = (url: string | undefined) => {
-    const candidates = imageCandidates(url);
-    if (!candidates.length) {
+    const normalized = resolveImage(url);
+    if (!normalized) {
       pushToast('error', 'No screenshot URL found');
       return;
     }
-    setPreviewImages(candidates);
-    setPreviewIndex(0);
+    setScreenshotPreviewUrl(normalized);
   };
 
   const closePreview = () => {
-    setPreviewImages([]);
-    setPreviewIndex(0);
+    setScreenshotPreviewUrl('');
   };
-
-  const activePreviewImage = previewImages[previewIndex] || '';
 
   const decide = async (item: QueueShift, status: DecisionStatus) => {
     const verifierId = localStorage.getItem('fairgig_user_id') || '';
@@ -512,30 +514,26 @@ export default function VerifierQueuePage() {
         </div>
       ) : null}
 
-      {activePreviewImage ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <button
-            type="button"
-            onClick={closePreview}
-            className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white"
-            aria-label="Close screenshot preview"
-          >
-            <X size={18} />
-          </button>
-          <img
-            src={activePreviewImage}
-            alt="queue screenshot preview"
-            className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"
-            onError={() => {
-              if (previewIndex < previewImages.length - 1) {
-                setPreviewIndex((current) => current + 1);
-                return;
-              }
-              pushToast('error', 'Could not load screenshot preview');
-            }}
-          />
-        </div>
-      ) : null}
+      {mounted && screenshotPreviewUrl
+        ? createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4">
+            <button
+              type="button"
+              onClick={closePreview}
+              className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white"
+              aria-label="Close screenshot preview"
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={screenshotPreviewUrl}
+              alt="queue screenshot preview"
+              className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"
+            />
+          </div>,
+          document.body,
+        )
+        : null}
 
       {toast ? (
         <div className="fixed bottom-4 right-4 z-[60] w-[min(360px,calc(100vw-2rem))]">

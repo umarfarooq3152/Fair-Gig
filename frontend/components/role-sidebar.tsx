@@ -11,7 +11,7 @@ const workerVerifierRoutes: Record<string, Array<{ href: string; label: string }
     { href: '/certificate', label: 'Certificate' },
     { href: '/community', label: 'Community' },
   ],
-  verifier: [{ href: '/queue', label: 'Verifier queue' }],
+  verifier: [{ href: '/verifier/queue', label: 'Verifier queue' }],
 };
 
 type AdvocateNavItem = { href: string; label: string; hash?: string };
@@ -73,71 +73,42 @@ export default function RoleSidebar() {
 
   const isAdvocate = role === 'advocate';
 
-  if (isAdvocate) {
-    return (
-      <aside className="no-print sidebar flex w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-900 text-slate-100">
-        <div className="p-4">
-          <div className="mb-8 flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-sm font-black text-white">
-              FG
-            </div>
-            <div>
-              <div className="text-lg font-bold tracking-tight text-white">FairGig</div>
-              <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Advocate</div>
-            </div>
-          </div>
-          <nav className="space-y-1">
-            {advocateNav.map((item) => {
-              const active = isAdvocateItemActive(pathname, hash, item);
-              const href = advocateLinkHref(item);
-              return (
-                <Link
-                  key={`${item.label}-${item.hash ?? 'root'}`}
-                  href={href}
-                  className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${active ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-        <div className="mt-auto border-t border-slate-800 p-4">
-          <div className="mb-3 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-700 text-sm font-semibold text-white">
-              {userName ? userName.slice(0, 1).toUpperCase() : 'A'}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">{userName || 'Advocate'}</p>
-              <p className="truncate text-xs text-slate-400">Labour advocate</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={logout}
-            className="w-full rounded-lg border border-slate-600 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
-          >
-            Sign out
-          </button>
-        </div>
-      </aside>
-    );
-  }
+  const links = isAdvocate ? advocateNav.map((item) => ({ href: advocateLinkHref(item), label: item.label })) : (workerVerifierRoutes[role] || workerVerifierRoutes.worker);
 
-  const links = workerVerifierRoutes[role] || workerVerifierRoutes.worker;
+  const isActive = (href: string, label: string) => {
+    if (isAdvocate) {
+      const navItem = advocateNav.find((item) => item.label === label);
+      if (!navItem) return pathname === href;
+      return isAdvocateItemActive(pathname, hash, navItem);
+    }
+    return pathname === href || (href === '/queue' && pathname === '/verifier/queue');
+  };
+
+  const roleLabel = isAdvocate ? 'Labour advocate' : role === 'verifier' ? 'Verifier' : 'Worker';
 
   return (
-    <aside className="no-print sidebar w-64 shrink-0 border-r border-gray-200 bg-white p-4">
-      <div className="mb-6 text-xl font-bold text-slate-900">FairGig</div>
-      <nav className="space-y-2">
+    <aside className="no-print sidebar sticky top-0 flex h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white text-slate-700">
+      <div className="border-b border-slate-100 p-4">
+        <div className="mb-8 flex items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-sm font-black text-white">
+            FG
+          </div>
+          <div>
+            <div className="text-lg font-bold tracking-tight text-slate-900">FairGig</div>
+            <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{role}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        <nav className="space-y-1">
         {links.map((item) => {
-          const active = pathname === item.href;
+          const active = isActive(item.href, item.label);
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`block rounded px-3 py-2 text-sm ${active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+              className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${active ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
             >
               {item.label}
@@ -145,11 +116,22 @@ export default function RoleSidebar() {
           );
         })}
       </nav>
-      <div className="mt-8 border-t border-gray-100 pt-4">
+      </div>
+
+      <div className="mt-auto border-t border-slate-200 bg-slate-50/60 p-4">
+        <div className="mb-3 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-sm font-semibold text-white">
+            {userName ? userName.slice(0, 1).toUpperCase() : roleLabel.slice(0, 1).toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-slate-900">{userName || roleLabel}</p>
+            <p className="truncate text-xs text-slate-500">{roleLabel}</p>
+          </div>
+        </div>
         <button
           type="button"
           onClick={logout}
-          className="w-full rounded px-3 py-2 text-left text-sm text-gray-600 hover:bg-gray-100"
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100"
         >
           Sign out
         </button>

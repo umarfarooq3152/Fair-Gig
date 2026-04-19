@@ -18,6 +18,7 @@ __pycache__/
 anomaly-service/venv/
 anomaly-service/__pycache__/
 venv/
+/venv/
 ENV/
 env/
 .venv/

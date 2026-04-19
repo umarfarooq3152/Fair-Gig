@@ -6,6 +6,7 @@ import { API_BASE, authFetch } from '@/lib/api';
 
 type PublicComplaint = {
   id: string;
+  post_kind?: 'complaint' | 'intel' | 'support_request' | string;
   platform: string;
   category: string;
   description: string;
@@ -18,6 +19,7 @@ type PublicComplaint = {
 
 type MyComplaint = {
   id: string;
+  post_kind?: 'complaint' | 'intel' | 'support_request' | string;
   platform: string;
   category: string;
   description: string;
@@ -37,6 +39,16 @@ const categories = [
 ];
 
 const platforms = ['Careem', 'Bykea', 'foodpanda', 'Upwork', 'Other'];
+const postKinds = [
+  { value: 'complaint', label: 'Complaint' },
+  { value: 'intel', label: 'Intel' },
+  { value: 'support_request', label: 'Support Request' },
+];
+
+function postKindLabel(kind: string | undefined) {
+  if (!kind) return 'complaint';
+  return kind.replaceAll('_', ' ');
+}
 
 function formatRelativeTime(dateLike: string) {
   const d = new Date(dateLike);
@@ -100,6 +112,7 @@ export default function CommunityPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState('');
   const [form, setForm] = useState({
+    post_kind: 'complaint',
     platform: 'Careem',
     category: 'other',
     description: '',
@@ -209,8 +222,9 @@ export default function CommunityPage() {
 
     try {
       const payload = {
+        post_kind: form.post_kind,
         platform: form.platform,
-        category: form.category,
+        category: form.post_kind === 'intel' ? 'other' : form.category,
         description: form.description,
         is_anonymous: form.is_anonymous,
         tags: [],
@@ -224,6 +238,7 @@ export default function CommunityPage() {
         if (imageFile) {
           const formData = new FormData();
           formData.append('platform', payload.platform);
+          formData.append('post_kind', payload.post_kind);
           formData.append('category', payload.category);
           formData.append('description', payload.description);
           formData.append('is_anonymous', String(payload.is_anonymous));
@@ -255,6 +270,7 @@ export default function CommunityPage() {
               const fd = new FormData();
               fd.append('worker_id', workerId);
               fd.append('platform', payload.platform);
+              fd.append('post_kind', payload.post_kind);
               fd.append('category', payload.category);
               fd.append('description', payload.description);
               fd.append('is_anonymous', String(payload.is_anonymous));
@@ -286,8 +302,8 @@ export default function CommunityPage() {
         return;
       }
 
-      setModalSuccess('Complaint submitted successfully');
-      setForm((prev) => ({ ...prev, description: '' }));
+      setModalSuccess('Post submitted successfully');
+      setForm((prev) => ({ ...prev, description: '', category: 'other', post_kind: 'complaint' }));
       setImageFile(null);
       setShowModal(false);
       await loadPublicComplaints();
@@ -314,7 +330,7 @@ export default function CommunityPage() {
               void loadMyComplaints();
             }}
           >
-            My Complaints
+            My Posts
           </button>
           <button
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
@@ -324,7 +340,7 @@ export default function CommunityPage() {
               setShowModal(true);
             }}
           >
-            + New Complaint
+            + New Post
           </button>
         </div>
       </div>
@@ -363,6 +379,10 @@ export default function CommunityPage() {
                       <span>•</span>
                       <span>
                         type: <span className="font-bold text-slate-800">#{categoryLabel(complaint.category).replaceAll(' ', '_')}</span>
+                      </span>
+                      <span>•</span>
+                      <span>
+                        post: <span className="font-bold text-slate-800">{postKindLabel(complaint.post_kind)}</span>
                       </span>
                       {complaint.status !== 'open' ? (
                         <>
@@ -452,7 +472,7 @@ export default function CommunityPage() {
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
             <div className="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
-              <h2 className="text-xl font-bold">Post New Complaint</h2>
+              <h2 className="text-xl font-bold">Create New Post</h2>
               <button
                 onClick={() => setShowModal(false)}
                 className="rounded border border-slate-200/40 px-2 py-1 text-sm text-white hover:bg-white/10"
@@ -462,6 +482,18 @@ export default function CommunityPage() {
             </div>
 
             <form className="grid gap-3 p-6" onSubmit={submitComplaint}>
+              <select
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                value={form.post_kind}
+                onChange={(e) => setForm((prev) => ({ ...prev, post_kind: e.target.value }))}
+              >
+                {postKinds.map((kind) => (
+                  <option key={kind.value} value={kind.value}>
+                    {kind.label}
+                  </option>
+                ))}
+              </select>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <select
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -475,22 +507,26 @@ export default function CommunityPage() {
                   ))}
                 </select>
 
-                <select
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  value={form.category}
-                  onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
-                >
-                  {categories.map((category) => (
-                    <option key={category} value={category}>
-                      {category.replaceAll('_', ' ')}
-                    </option>
-                  ))}
-                </select>
+                {form.post_kind === 'intel' ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">Intel posts do not require a type</div>
+                ) : (
+                  <select
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={form.category}
+                    onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+                  >
+                    {categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category.replaceAll('_', ' ')}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <textarea
                 className="min-h-28 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                placeholder="Describe the issue in detail (minimum 20 characters)"
+                placeholder="Describe the post in detail (minimum 20 characters)"
                 value={form.description}
                 onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
               />
@@ -528,7 +564,7 @@ export default function CommunityPage() {
                   type="submit"
                   disabled={posting}
                 >
-                  {posting ? 'Posting...' : 'Submit Complaint'}
+                  {posting ? 'Posting...' : 'Submit Post'}
                 </button>
               </div>
 
@@ -545,7 +581,7 @@ export default function CommunityPage() {
         <div className="fixed inset-0 z-[121] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
           <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
             <div className="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
-              <h2 className="text-xl font-bold">My Complaints</h2>
+              <h2 className="text-xl font-bold">My Posts</h2>
               <button
                 onClick={() => setShowMyModal(false)}
                 className="rounded border border-slate-200/40 px-2 py-1 text-sm text-white hover:bg-white/10"
@@ -557,9 +593,9 @@ export default function CommunityPage() {
             <div className="max-h-[70vh] space-y-3 overflow-y-auto p-6">
               {myModalError ? <p className="text-sm font-medium text-red-600">{myModalError}</p> : null}
               {myLoading ? (
-                <p className="text-sm text-slate-500">Loading your complaints...</p>
+                <p className="text-sm text-slate-500">Loading your posts...</p>
               ) : myComplaints.length === 0 ? (
-                <p className="text-sm text-slate-500">You have not submitted any complaints yet.</p>
+                <p className="text-sm text-slate-500">You have not submitted any posts yet.</p>
               ) : (
                 myComplaints.map((complaint) => (
                   <div key={complaint.id} className="rounded-xl border border-slate-200 p-4">
@@ -569,6 +605,8 @@ export default function CommunityPage() {
                       <span>{complaint.platform}</span>
                       <span>•</span>
                       <span>{complaint.category.replaceAll('_', ' ')}</span>
+                      <span>•</span>
+                      <span>{postKindLabel(complaint.post_kind)}</span>
                     </div>
                     <p className="text-sm leading-6 text-slate-800">{complaint.description}</p>
                     <div className="mt-3">

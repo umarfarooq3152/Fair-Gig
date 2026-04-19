@@ -20,6 +20,12 @@ function decodeRoleFromToken(token: string | undefined): string | null {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Allow public/static assets to bypass auth checks.
+  if (pathname.startsWith('/fonts/') || /\.[a-zA-Z0-9]+$/.test(pathname)) {
+    return NextResponse.next();
+  }
+
   if (
     pathname === '/' ||
     pathname.startsWith('/login') ||

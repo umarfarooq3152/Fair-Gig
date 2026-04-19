@@ -181,6 +181,8 @@ app.post('/api/complaints', complaintUpload.single('image'), async (req, res) =>
   try {
     const auth = await requireRole(req, ['worker']);
     const { platform, category, description, tags } = req.body;
+    const post_kind_raw = String(req.body?.post_kind || 'complaint').trim().toLowerCase();
+    const post_kind = post_kind_raw === 'support_request' || post_kind_raw === 'intel' ? post_kind_raw : 'complaint';
     const is_anonymous = String(req.body?.is_anonymous ?? 'true') === 'true';
     let image_url: string | null = null;
 
@@ -203,6 +205,10 @@ app.post('/api/complaints', complaintUpload.single('image'), async (req, res) =>
       return res.status(400).json({ detail: 'platform and description are required' });
     }
 
+    if (post_kind !== 'intel' && !category) {
+      return res.status(400).json({ detail: 'category is required for complaint and support request posts' });
+    }
+
     if (String(description).trim().length < 20) {
       return res.status(400).json({ detail: 'description must be at least 20 characters' });
     }
@@ -220,17 +226,18 @@ app.post('/api/complaints', complaintUpload.single('image'), async (req, res) =>
 
     const result = await pool.query(
       `INSERT INTO grievance.complaints
-       (worker_id, platform, category, description, is_anonymous, tags, status, image_url)
-       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open', $7)
-       RETURNING id, platform, category, description, is_anonymous, tags, status, image_url, created_at`,
+       (worker_id, platform, category, description, is_anonymous, tags, status, image_url, post_kind)
+       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open', $7, $8)
+       RETURNING id, platform, category, description, is_anonymous, tags, status, image_url, post_kind, created_at`,
       [
         auth.userId,
         platform,
-        category || 'other',
+        post_kind === 'intel' ? 'other' : (category || 'other'),
         String(description).trim(),
         Boolean(is_anonymous),
         cleanTags(tags),
         image_url,
+        post_kind,
       ],
     );
 
@@ -268,6 +275,7 @@ app.get('/api/complaints/mine', async (req, res) => {
          worker_id,
          platform,
          category,
+         post_kind,
          description,
          is_anonymous,
          tags,
@@ -301,7 +309,7 @@ app.get('/api/complaints/mine', async (req, res) => {
 // ---------------------------------------------------------------------------
 app.get('/api/complaints/public', async (req, res) => {
   try {
-    const { platform, category, status } = req.query;
+    const { platform, category, status, post_kind } = req.query;
     const values: unknown[] = [];
     const where: string[] = [];
 
@@ -317,12 +325,17 @@ app.get('/api/complaints/public', async (req, res) => {
       values.push(status);
       where.push(`c.status = $${values.length}::grievance.complaint_status`);
     }
+    if (post_kind) {
+      values.push(String(post_kind));
+      where.push(`c.post_kind = $${values.length}`);
+    }
 
     const result = await pool.query(
       `SELECT
          c.id,
          c.platform,
          c.category,
+         c.post_kind,
          c.description,
          c.is_anonymous,
          c.tags,
@@ -356,7 +369,7 @@ app.get('/api/complaints/advocate', async (req, res) => {
 
     const { platform, category, status, cluster_id } = req.query;
     const values: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = [`c.post_kind IN ('complaint', 'support_request')`];
 
     if (platform) {
       values.push(platform);
@@ -383,6 +396,7 @@ app.get('/api/complaints/advocate', async (req, res) => {
          u.email AS worker_email,
          c.platform,
          c.category,
+         c.post_kind,
          c.description,
          c.is_anonymous,
          c.tags,
@@ -426,7 +440,7 @@ app.get('/api/complaints/advocate/feed', async (req, res) => {
     const { platform, category, status, cluster_id, cursor } = req.query;
     const limit = parsePositiveInt(req.query.limit, 50, 100);
     const values: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = [`c.post_kind IN ('complaint', 'support_request')`];
 
     if (platform) {
       values.push(platform);
@@ -464,6 +478,7 @@ app.get('/api/complaints/advocate/feed', async (req, res) => {
          u.email AS worker_email,
          c.platform,
          c.category,
+         c.post_kind,
          c.description,
          c.is_anonymous,
          c.tags,
@@ -516,7 +531,7 @@ app.get('/api/complaints/advocate/new-count', async (req, res) => {
 
     const { since, platform, category, status } = req.query;
     const values: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = [`c.post_kind IN ('complaint', 'support_request')`];
 
     if (since) {
       values.push(String(since));
@@ -574,6 +589,7 @@ app.get('/api/complaints/alerts/spikes', async (req, res) => {
          MAX(created_at) AS latest_seen_at
        FROM grievance.complaints
        WHERE created_at >= NOW() - ($1::text || ' hours')::interval
+         AND post_kind IN ('complaint', 'support_request')
        GROUP BY platform, category
        HAVING COUNT(*) >= $2
        ORDER BY COUNT(*) DESC, MAX(created_at) DESC
@@ -1174,6 +1190,7 @@ app.get('/api/complaints/:id', async (req, res) => {
          worker_id,
          platform,
          category,
+         post_kind,
          description,
          tags,
          status,
@@ -1206,6 +1223,8 @@ app.get('/complaints', (req, res) => {
 app.post('/complaints', complaintUpload.single('image'), async (req, res) => {
   try {
     const { worker_id, platform, category, description, is_anonymous, tags } = req.body;
+    const post_kind_raw = String(req.body?.post_kind || 'complaint').trim().toLowerCase();
+    const post_kind = post_kind_raw === 'support_request' || post_kind_raw === 'intel' ? post_kind_raw : 'complaint';
     let image_url: string | null = null;
     if (req.file) {
       try {
@@ -1224,23 +1243,27 @@ app.post('/complaints', complaintUpload.single('image'), async (req, res) => {
     if (!worker_id || !platform || !description) {
       return res.status(400).json({ detail: 'worker_id, platform and description are required' });
     }
+    if (post_kind !== 'intel' && !category) {
+      return res.status(400).json({ detail: 'category is required for complaint and support request posts' });
+    }
     if (String(description).trim().length < 20) {
       return res.status(400).json({ detail: 'description must be at least 20 characters' });
     }
 
     const result = await pool.query(
       `INSERT INTO grievance.complaints
-       (worker_id, platform, category, description, is_anonymous, tags, status, image_url)
-       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open', $7)
-       RETURNING id, worker_id, platform, category, description, is_anonymous, tags, status, image_url, created_at`,
+       (worker_id, platform, category, description, is_anonymous, tags, status, image_url, post_kind)
+       VALUES ($1, $2, $3::grievance.complaint_category, $4, $5, $6, 'open', $7, $8)
+       RETURNING id, worker_id, platform, category, description, is_anonymous, tags, status, image_url, post_kind, created_at`,
       [
         String(worker_id),
         String(platform),
-        category || 'other',
+        post_kind === 'intel' ? 'other' : (category || 'other'),
         String(description).trim(),
         String(is_anonymous ?? 'true') === 'true',
         cleanTags(tags),
         image_url,
+        post_kind,
       ],
     );
 
@@ -1276,6 +1299,8 @@ app.get('/complaints/clusters', (_req, res) => {
 
 async function bootstrap() {
   await pool.query(`ALTER TABLE grievance.complaints ADD COLUMN IF NOT EXISTS image_url TEXT`);
+  await pool.query(`ALTER TABLE grievance.complaints ADD COLUMN IF NOT EXISTS post_kind TEXT NOT NULL DEFAULT 'complaint'`);
+  await pool.query(`UPDATE grievance.complaints SET post_kind = 'complaint' WHERE post_kind IS NULL`);
   app.listen(PORT, () => {
     console.log(`Grievance Service running on port ${PORT}`);
   });
