@@ -1,4 +1,5 @@
 import { Footer } from '@/components/landing/Footer';
+import { AuthSection } from '@/components/landing/Auth';
 import { Charts } from '@/components/landing/Charts';
 import { Features } from '@/components/landing/Features';
 import { Hero } from '@/components/landing/Hero';
@@ -20,6 +21,7 @@ export default function Page() {
         <Features />
         <Testimonials />
         <IncomeCertificate />
+        <AuthSection />
       </main>
       <Footer />
     </div>
