@@ -1,15 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { API_BASE, authFetch } from '@/lib/api';
 import {
   Search,
-  Filter,
   RefreshCw,
   AlertCircle,
   Tag as TagIcon,
   Link as LinkIcon,
-  ChevronRight,
   CheckCircle2,
   XCircle,
   AlertTriangle,
@@ -17,11 +16,11 @@ import {
   ChevronDown,
   User,
   Clock,
-  ExternalLink,
   Loader2,
   Trash2,
-  Escalator,
-  Check
+  Check,
+  Save,
+  Plus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -76,6 +75,7 @@ const categories = [
 const platformOptions = ['Careem', 'Bykea', 'foodpanda', 'Upwork', 'Other'];
 
 export default function AdvocateGrievancesPage() {
+  const [mounted, setMounted] = useState(false);
   const [items, setItems] = useState<AdvocateComplaint[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -84,13 +84,22 @@ export default function AdvocateGrievancesPage() {
   const [clusterName, setClusterName] = useState('Systemic Issue Cluster');
   const [clusterTag, setClusterTag] = useState('payment_delay');
   const [existingClusterId, setExistingClusterId] = useState('');
-  const [bulkTagsInput, setBulkTagsInput] = useState('');
+  const [targetClusterId, setTargetClusterId] = useState('');
+  const [bulkTagInput, setBulkTagInput] = useState('');
+  const [bulkTags, setBulkTags] = useState<string[]>([]);
+  const [draftTagsById, setDraftTagsById] = useState<Record<string, string[]>>({});
+  const [rowTagInputById, setRowTagInputById] = useState<Record<string, string>>({});
+  const [draggedComplaintIds, setDraggedComplaintIds] = useState<string[]>([]);
+  const [showClusterModal, setShowClusterModal] = useState(false);
+  const [clusterModalName, setClusterModalName] = useState('');
+  const [clusterModalComplaintIds, setClusterModalComplaintIds] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [newCount, setNewCount] = useState(0);
   const [clusters, setClusters] = useState<ClusterItem[]>([]);
   const [spikes, setSpikes] = useState<SpikeItem[]>([]);
+  const [activeSpikeFilter, setActiveSpikeFilter] = useState<{ platform: string; category: string } | null>(null);
 
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -108,8 +117,94 @@ export default function AdvocateGrievancesPage() {
     return clusterIds.length === 1 ? clusterIds[0] : '';
   }, [selectedComplaints]);
 
+  const clusterNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    clusters.forEach((cluster) => {
+      map.set(cluster.id, cluster.name);
+    });
+    return map;
+  }, [clusters]);
+
+  const visibleItems = useMemo(() => {
+    let rows = items;
+
+    if (existingClusterId) {
+      rows = rows.filter((item) => item.cluster_id === existingClusterId);
+    }
+
+    if (activeSpikeFilter) {
+      rows = rows.filter(
+        (item) =>
+          item.platform.toLowerCase() === activeSpikeFilter.platform.toLowerCase() &&
+          item.category.toLowerCase() === activeSpikeFilter.category.toLowerCase(),
+      );
+    }
+
+    return rows;
+  }, [items, existingClusterId, activeSpikeFilter]);
+
   const newestTimestamp = useMemo(() => items[0]?.created_at || '', [items]);
   const selectedCount = selectedIds.length;
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleItems.map((item) => item.id));
+    setSelectedIds((prev) => prev.filter((id) => visibleIds.has(id)));
+  }, [visibleItems]);
+
+  function normalizeTag(value: string) {
+    return value.trim().replace(/^#/, '').replace(/\s+/g, '_').toLowerCase();
+  }
+
+  function getRowTags(item: AdvocateComplaint) {
+    return draftTagsById[item.id] ?? (item.tags || []);
+  }
+
+  function hasPendingTagChanges(item: AdvocateComplaint) {
+    return JSON.stringify(getRowTags(item)) !== JSON.stringify(item.tags || []);
+  }
+
+  function pushRowTag(id: string, raw: string) {
+    const tag = normalizeTag(raw);
+    if (!tag) return;
+    setDraftTagsById((prev) => {
+      const current = prev[id] ?? (items.find((row) => row.id === id)?.tags || []);
+      if (current.includes(tag)) return prev;
+      return { ...prev, [id]: [...current, tag] };
+    });
+  }
+
+  function removeRowTag(id: string, tag: string) {
+    setDraftTagsById((prev) => {
+      const current = prev[id] ?? (items.find((row) => row.id === id)?.tags || []);
+      return { ...prev, [id]: current.filter((entry) => entry !== tag) };
+    });
+  }
+
+  async function saveRowTags(item: AdvocateComplaint) {
+    const nextTags = getRowTags(item);
+    if (!hasPendingTagChanges(item)) return;
+    await moderateComplaint(item.id, { tags: nextTags });
+    setDraftTagsById((prev) => {
+      const copy = { ...prev };
+      delete copy[item.id];
+      return copy;
+    });
+  }
+
+  function addBulkTag(raw: string) {
+    const parsed = raw
+      .split(/[\n,]/)
+      .map(normalizeTag)
+      .filter(Boolean);
+    if (!parsed.length) return;
+    setBulkTags((prev) => Array.from(new Set([...prev, ...parsed])));
+  }
+
+  function activeDragIds(fallbackId?: string) {
+    if (draggedComplaintIds.length) return draggedComplaintIds;
+    if (selectedIds.length) return selectedIds;
+    return fallbackId ? [fallbackId] : [];
+  }
 
   function buildFilterParams() {
     const params = new URLSearchParams();
@@ -181,7 +276,7 @@ export default function AdvocateGrievancesPage() {
 
   async function loadSpikeAlerts() {
     try {
-      const res = await authFetch(`${API_BASE.grievance}/api/complaints/alerts/spikes?window_hours=3&min_count=5`);
+      const res = await authFetch(`${API_BASE.grievance}/api/complaints/alerts/spikes?window_hours=3&min_count=10`);
       const data = await res.json();
       if (res.ok) {
         setSpikes(Array.isArray(data?.items) ? data.items : []);
@@ -208,6 +303,10 @@ export default function AdvocateGrievancesPage() {
   }
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     void loadFeed(true);
     void loadClusters();
     void loadSpikeAlerts();
@@ -231,7 +330,7 @@ export default function AdvocateGrievancesPage() {
       setSelectedIds([]);
       return;
     }
-    setSelectedIds(items.map((item) => item.id));
+    setSelectedIds(visibleItems.map((item) => item.id));
   }
 
   async function moderateComplaint(id: string, patch: Partial<AdvocateComplaint>) {
@@ -262,21 +361,88 @@ export default function AdvocateGrievancesPage() {
   }
 
   async function createClusterFromSelected() {
-    if (selectedIds.length < 2) {
-      setError('Select at least two complaints to create a cluster');
+    if (selectedIds.length < 1) {
+      setError('Select at least one complaint to create a cluster');
+      return;
+    }
+    setClusterModalComplaintIds(selectedIds);
+    setClusterModalName(clusterName || '');
+    setShowClusterModal(true);
+  }
+
+  async function addComplaintsToCluster(clusterId: string, complaintIds: string[]) {
+    if (!clusterId) {
+      setError('Choose an existing cluster first');
+      return;
+    }
+    if (complaintIds.length < 1) {
+      setError('Select at least one complaint to add to a cluster');
       return;
     }
 
     setError('');
     setMessage('');
+    setActionBusy(true);
 
+    try {
+      const res = await authFetch(`${API_BASE.grievance}/api/complaints/cluster/${clusterId}/add`, {
+        method: 'POST',
+        body: JSON.stringify({ complaint_ids: complaintIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.detail || 'Could not add complaints to cluster');
+        return;
+      }
+
+      setItems((prev) =>
+        prev.map((item) =>
+          data.linked_complaint_ids?.includes(item.id)
+            ? { ...item, cluster_id: clusterId }
+            : item,
+        ),
+      );
+      setMessage(`Added ${data.linked_count} complaints to selected cluster.`);
+      setSelectedIds((prev) => prev.filter((id) => !complaintIds.includes(id)));
+      await loadClusters();
+    } catch {
+      setError('Could not connect to grievance service');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function addToExistingCluster() {
+    await addComplaintsToCluster(targetClusterId, selectedIds);
+  }
+
+  async function createClusterByName(name: string, complaintIds: string[]) {
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setError('Cluster name is required');
+      return;
+    }
+    if (complaintIds.length < 1) {
+      setError('Select at least one complaint to create a cluster');
+      return;
+    }
+
+    const sameNameCluster = clusters.find((cluster) => cluster.name.trim().toLowerCase() === cleanName.toLowerCase());
+    if (sameNameCluster) {
+      await addComplaintsToCluster(sameNameCluster.id, complaintIds);
+      setTargetClusterId(sameNameCluster.id);
+      return;
+    }
+
+    setError('');
+    setMessage('');
     setActionBusy(true);
     try {
       const res = await authFetch(`${API_BASE.grievance}/api/complaints/cluster`, {
         method: 'POST',
         body: JSON.stringify({
-          complaint_ids: selectedIds,
-          name: clusterName || `Cluster ${new Date().toLocaleString()}`,
+          complaint_ids: complaintIds,
+          name: cleanName,
           primary_tag: clusterTag || 'untagged',
           platform: selectedComplaints[0]?.platform || null,
         }),
@@ -294,8 +460,9 @@ export default function AdvocateGrievancesPage() {
             : item,
         ),
       );
+      setTargetClusterId(data.cluster.id);
       setMessage(`Cluster created. Linked ${data.linked_count} complaints.`);
-      setSelectedIds([]);
+      setSelectedIds((prev) => prev.filter((id) => !complaintIds.includes(id)));
       await loadClusters();
     } catch {
       setError('Could not connect to grievance service');
@@ -304,40 +471,46 @@ export default function AdvocateGrievancesPage() {
     }
   }
 
-  async function addToExistingCluster() {
-    if (!existingClusterId) {
-      setError('Choose an existing cluster first');
-      return;
-    }
-    if (selectedIds.length < 1) {
-      setError('Select at least one complaint to add to a cluster');
-      return;
-    }
-
+  async function setClusterCascadeStatus(clusterId: string, status: 'escalated' | 'resolved') {
+    setActionBusy(true);
     setError('');
     setMessage('');
-    setActionBusy(true);
-
     try {
-      const res = await authFetch(`${API_BASE.grievance}/api/complaints/cluster/${existingClusterId}/add`, {
-        method: 'POST',
-        body: JSON.stringify({ complaint_ids: selectedIds }),
+      const res = await authFetch(`${API_BASE.grievance}/api/complaints/cluster/${clusterId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data?.detail || 'Could not add complaints to cluster');
+        setError(data?.detail || 'Could not update cluster status');
         return;
       }
+      setItems((prev) => prev.map((item) => (item.cluster_id === clusterId ? { ...item, status } : item)));
+      setMessage(`Cluster ${status} applied to ${data.affected_count} complaints.`);
+    } catch {
+      setError('Could not connect to grievance service');
+    } finally {
+      setActionBusy(false);
+    }
+  }
 
-      setItems((prev) =>
-        prev.map((item) =>
-          data.linked_complaint_ids?.includes(item.id)
-            ? { ...item, cluster_id: existingClusterId }
-            : item,
-        ),
-      );
-      setMessage(`Added ${data.linked_count} complaints to selected cluster.`);
-      setSelectedIds([]);
+  async function deleteCluster(clusterId: string) {
+    setActionBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await authFetch(`${API_BASE.grievance}/api/complaints/cluster/${clusterId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.detail || 'Could not delete cluster');
+        return;
+      }
+      setItems((prev) => prev.map((item) => (item.cluster_id === clusterId ? { ...item, cluster_id: null } : item)));
+      if (existingClusterId === clusterId) setExistingClusterId('');
+      if (targetClusterId === clusterId) setTargetClusterId('');
+      setMessage('Cluster deleted and complaints detached.');
       await loadClusters();
     } catch {
       setError('Could not connect to grievance service');
@@ -347,10 +520,10 @@ export default function AdvocateGrievancesPage() {
   }
 
   async function assignTagsToSelected() {
-    const tags = bulkTagsInput
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean);
+    const tags = Array.from(new Set([
+      ...bulkTags,
+      ...bulkTagInput.split(/[\n,]/).map(normalizeTag).filter(Boolean),
+    ]));
 
     if (selectedIds.length < 1) {
       setError('Select at least one complaint first');
@@ -379,6 +552,8 @@ export default function AdvocateGrievancesPage() {
       setItems((prev) => prev.map((item) => (selectedIds.includes(item.id) ? { ...item, tags } : item)));
       setMessage(`Assigned tags to ${data.updated_count} complaints.`);
       setSelectedIds([]);
+      setBulkTagInput('');
+      setBulkTags([]);
     } catch {
       setError('Could not connect to grievance service');
     } finally {
@@ -461,6 +636,14 @@ export default function AdvocateGrievancesPage() {
   async function loadNewComplaints() {
     await loadFeed(true);
     setNewCount(0);
+  }
+
+  async function saveClusterModal() {
+    const ids = clusterModalComplaintIds.length ? clusterModalComplaintIds : selectedIds;
+    await createClusterByName(clusterModalName || clusterName, ids);
+    setShowClusterModal(false);
+    setClusterModalName('');
+    setClusterModalComplaintIds([]);
   }
 
   function statusBadge(status: AdvocateComplaint['status']) {
@@ -561,23 +744,6 @@ export default function AdvocateGrievancesPage() {
                 </div>
               </div>
 
-              {newCount > 0 && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  className="mt-3"
-                >
-                  <button
-                    type="button"
-                    className="w-full group flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-blue-200 hover:bg-blue-700 transition-all active:scale-[0.98]"
-                    onClick={() => void loadNewComplaints()}
-                  >
-                    <Layers className="h-4 w-4" />
-                    Load {newCount} New Incident{newCount > 1 ? 's' : ''}
-                    <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-                  </button>
-                </motion.div>
-              )}
             </div>
 
             {error && (
@@ -593,12 +759,12 @@ export default function AdvocateGrievancesPage() {
             )}
 
             {/* Table Header */}
-            <div className="grid grid-cols-[40px,160px,130px,1fr,150px,80px] items-center gap-4 bg-slate-50/80 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100">
+            <div className="grid grid-cols-[40px,170px,130px,1fr,190px] items-center gap-4 bg-slate-50/80 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100">
               <div className="flex justify-center">
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
-                  checked={items.length > 0 && selectedIds.length === items.length}
+                  checked={visibleItems.length > 0 && selectedIds.length === visibleItems.length}
                   onChange={(e) => toggleAllVisible(e.target.checked)}
                 />
               </div>
@@ -606,32 +772,51 @@ export default function AdvocateGrievancesPage() {
               <span>Classification</span>
               <span>Testimony & Evidence</span>
               <span>Tags & Labeling</span>
-              <div className="text-right pr-4">Identity</div>
             </div>
 
-            <div className="max-h-[calc(100vh-320px)] overflow-y-auto divide-y divide-slate-50">
+            <div className="divide-y divide-slate-50">
               <AnimatePresence mode="popLayout">
                 {loadingInitial ? (
                   <div className="flex flex-col items-center justify-center py-24 gap-3 text-slate-400">
                     <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                     <p className="text-sm font-medium">Analyzing records...</p>
                   </div>
-                ) : items.length === 0 ? (
+                ) : visibleItems.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-24 gap-2 text-slate-400">
                     <div className="rounded-full bg-slate-100 p-4">
                       <Search className="h-8 w-8" />
                     </div>
-                    <p className="text-sm font-medium mt-2 text-slate-500">No matching incidents found.</p>
-                    <p className="text-xs">Adjust your filters to see more data.</p>
+                    <p className="text-sm font-medium mt-2 text-slate-500">
+                      {existingClusterId
+                        ? 'No incidents found in the focused cluster.'
+                        : 'No matching incidents found.'}
+                    </p>
+                    <p className="text-xs">
+                      {existingClusterId
+                        ? 'Unfocus the cluster to view all complaints again.'
+                        : 'Adjust your filters to see more data.'}
+                    </p>
                   </div>
                 ) : (
-                  items.map((item, idx) => (
+                  visibleItems.map((item, idx) => (
                     <motion.div
                       key={item.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: idx * 0.02 }}
-                      className={`group grid grid-cols-[40px,160px,130px,1fr,150px,80px] items-start gap-4 px-4 py-4 transition-colors hover:bg-slate-50/50 ${selectedIds.includes(item.id) ? 'bg-blue-50/30' : ''}`}
+                      className={`group grid grid-cols-[40px,170px,130px,1fr,190px] items-start gap-4 px-4 py-4 transition-colors hover:bg-slate-50/50 ${selectedIds.includes(item.id) ? 'bg-blue-50/30' : ''}`}
+                      onClick={(event) => {
+                        const target = event.target as HTMLElement;
+                        if (target.closest('button,input,textarea,select,a,label')) return;
+                        toggleRow(item.id);
+                      }}
+                      draggable
+                      onDragStart={() => {
+                        setDraggedComplaintIds(activeDragIds(item.id));
+                      }}
+                      onDragEnd={() => {
+                        setDraggedComplaintIds([]);
+                      }}
                     >
                       <div className="flex justify-center pt-1">
                         <input
@@ -673,29 +858,37 @@ export default function AdvocateGrievancesPage() {
                             }
                           }}
                         />
-                        {item.cluster_id && (
-                          <div className="flex items-center justify-between gap-3 p-2 bg-slate-50 border border-slate-200 rounded-lg group/cluster">
-                            <div className="flex items-center gap-2 overflow-hidden">
-                              <Layers className="h-3 w-3 shrink-0 text-blue-500" />
-                              <span className="truncate text-[10px] font-medium text-slate-500">CID: {item.cluster_id.split('-')[0]}...</span>
-                            </div>
+                        {item.cluster_id ? (
+                          <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">
+                            <Layers className="h-3 w-3" />
+                            <span>{clusterNameById.get(item.cluster_id) || 'Unknown cluster'}</span>
                             <button
                               type="button"
-                              className="shrink-0 px-2 py-1 text-[10px] font-bold text-slate-400 hover:text-rose-500 transition-colors"
+                              className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-md text-base leading-none text-blue-600 hover:bg-blue-100 hover:text-blue-900"
                               onClick={() => void unclusterComplaint(item.id)}
+                              aria-label="Remove from cluster"
+                              title="Remove from cluster"
                             >
-                              Detatch
+                              ×
                             </button>
                           </div>
-                        )}
+                        ) : null}
                       </div>
 
                       <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
-                          {(item.tags || []).length > 0 ? (
-                            (item.tags || []).slice(0, 3).map(t => (
+                          {getRowTags(item).length > 0 ? (
+                            getRowTags(item).map((t) => (
                               <span key={t} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold uppercase tracking-wider border border-blue-100">
-                                {t}
+                                #{t}
+                                <button
+                                  type="button"
+                                  className="ml-1 text-blue-400 hover:text-blue-700"
+                                  onClick={() => removeRowTag(item.id, t)}
+                                  aria-label={`Remove ${t}`}
+                                >
+                                  ×
+                                </button>
                               </span>
                             ))
                           ) : (
@@ -707,21 +900,27 @@ export default function AdvocateGrievancesPage() {
                           <input
                             className="w-full pl-6 pr-2 py-1 text-[11px] bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                             placeholder="Add tag..."
-                            defaultValue={(item.tags || []).join(', ')}
-                            onBlur={(e) => {
-                              const nextTags = e.target.value.split(',').map(t => t.trim()).filter(Boolean);
-                              if (JSON.stringify(nextTags) !== JSON.stringify(item.tags)) {
-                                void moderateComplaint(item.id, { tags: nextTags });
-                              }
+                            value={rowTagInputById[item.id] || ''}
+                            onChange={(e) => {
+                              setRowTagInputById((prev) => ({ ...prev, [item.id]: e.target.value }));
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return;
+                              e.preventDefault();
+                              pushRowTag(item.id, rowTagInputById[item.id] || '');
+                              setRowTagInputById((prev) => ({ ...prev, [item.id]: '' }));
                             }}
                           />
                         </div>
-                      </div>
-
-                      <div className="flex justify-end pr-1">
-                        <button className="h-8 w-8 flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm">
-                          <ExternalLink className="h-4 w-4" />
-                        </button>
+                        {hasPendingTagChanges(item) ? (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700"
+                            onClick={() => void saveRowTags(item)}
+                          >
+                            <Save className="h-3 w-3" /> Save
+                          </button>
+                        ) : null}
                       </div>
                     </motion.div>
                   ))
@@ -764,7 +963,22 @@ export default function AdvocateGrievancesPage() {
               <h2 className="text-[13px] font-bold text-slate-800 uppercase tracking-wider">Live Spikes</h2>
             </div>
             <div className="p-4 space-y-3">
-              <p className="text-[11px] font-medium text-slate-500 leading-relaxed">Systemic detection engine tracking high-volume anomalies in the last 3 hours.</p>
+              <p className="text-[11px] font-medium text-slate-500 leading-relaxed">Shows only spikes with 10+ complaints for the same provider and issue category (last 3 hours).</p>
+
+              {activeSpikeFilter ? (
+                <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px]">
+                  <span className="font-semibold text-amber-900">
+                    Focused: {activeSpikeFilter.platform} · {activeSpikeFilter.category.replace(/_/g, ' ')}
+                  </span>
+                  <button
+                    type="button"
+                    className="rounded-md border border-amber-300 px-2 py-1 font-bold text-amber-800 hover:bg-amber-100"
+                    onClick={() => setActiveSpikeFilter(null)}
+                  >
+                    Unfocus
+                  </button>
+                </div>
+              ) : null}
 
               {spikes.length === 0 ? (
                 <div className="rounded-xl bg-slate-50 p-4 text-center border border-dashed border-slate-200">
@@ -778,7 +992,24 @@ export default function AdvocateGrievancesPage() {
                       key={`${spike.platform}-${spike.category}`}
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="group p-3 rounded-xl border border-amber-200 bg-amber-50/50 hover:bg-amber-50 transition-all cursor-help relative overflow-hidden"
+                      className={`group p-3 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${
+                        activeSpikeFilter?.platform.toLowerCase() === spike.platform.toLowerCase() &&
+                        activeSpikeFilter?.category.toLowerCase() === spike.category.toLowerCase()
+                          ? 'border-amber-400 bg-amber-100'
+                          : 'border-amber-200 bg-amber-50/50 hover:bg-amber-50'
+                      }`}
+                      onClick={() => {
+                        setActiveSpikeFilter((prev) => {
+                          if (
+                            prev &&
+                            prev.platform.toLowerCase() === spike.platform.toLowerCase() &&
+                            prev.category.toLowerCase() === spike.category.toLowerCase()
+                          ) {
+                            return null;
+                          }
+                          return { platform: spike.platform, category: spike.category };
+                        });
+                      }}
                     >
                       <div className="relative z-10 flex items-start justify-between gap-2">
                         <div>
@@ -801,49 +1032,93 @@ export default function AdvocateGrievancesPage() {
             <div className="p-4 border-b border-slate-100 flex items-center gap-2">
               <Layers className="h-4 w-4 text-blue-500" />
               <h2 className="text-[13px] font-bold text-slate-800 uppercase tracking-wider">Reference Clusters</h2>
+              <button
+                type="button"
+                className="ml-auto inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+                onClick={() => {
+                  setClusterModalComplaintIds(selectedIds);
+                  setClusterModalName('');
+                  setShowClusterModal(true);
+                }}
+              >
+                <Plus className="h-3 w-3" /> Add New
+              </button>
             </div>
-            <div className="p-4">
-              <p className="text-[11px] font-medium text-slate-500 mb-4 leading-relaxed">Select a target cluster to enable cascade operations from the multi-action tray.</p>
+            <div className="p-4 space-y-3">
+              <p className="text-[11px] font-medium text-slate-500 leading-relaxed">Click cluster actions directly. Drag selected incidents onto a cluster card to add them.</p>
 
-              <div className="relative group">
-                <Layers className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                <select
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-10 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all cursor-pointer"
-                  value={existingClusterId}
-                  onChange={(e) => setExistingClusterId(e.target.value)}
+              {clusters.map((cluster) => (
+                <div
+                  key={cluster.id}
+                  className={`rounded-xl border p-3 transition-colors ${existingClusterId === cluster.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => void addComplaintsToCluster(cluster.id, activeDragIds())}
                 >
-                  <option value="">Choose cluster...</option>
-                  {clusters.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.complaint_count})
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-              </div>
-
-              {existingClusterId && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="mt-4 p-3 rounded-xl bg-blue-50 border border-blue-100"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                    <span className="text-[11px] font-bold text-blue-700 uppercase tracking-widest leading-none pt-0.5">Focus Mode Active</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">{cluster.name}</p>
+                      <p className="text-[10px] text-slate-500">{cluster.complaint_count} complaint(s)</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600"
+                      onClick={() => {
+                        setExistingClusterId((prev) => (prev === cluster.id ? '' : cluster.id));
+                        setTargetClusterId(cluster.id);
+                      }}
+                    >
+                      {existingClusterId === cluster.id ? 'Unfocus' : 'Focus'}
+                    </button>
                   </div>
-                </motion.div>
-              )}
+
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      className="rounded-md bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-700"
+                      onClick={() => void setClusterCascadeStatus(cluster.id, 'escalated')}
+                    >
+                      Escalate
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-700"
+                      onClick={() => void setClusterCascadeStatus(cluster.id, 'resolved')}
+                    >
+                      Resolve
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-700"
+                      onClick={() => void addComplaintsToCluster(cluster.id, selectedIds)}
+                    >
+                      Add Selected
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md bg-rose-500/10 px-2 py-1 text-[10px] font-bold text-rose-700"
+                      onClick={() => void deleteCluster(cluster.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              <div
+                className="rounded-xl border border-dashed border-slate-300 p-3 text-center text-[11px] font-semibold text-slate-500"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => {
+                  const ids = activeDragIds();
+                  if (!ids.length) return;
+                  setClusterModalComplaintIds(ids);
+                  setClusterModalName('');
+                  setShowClusterModal(true);
+                }}
+              >
+                Drop here to create a new cluster from selected incidents
+              </div>
             </div>
           </section>
-
-          <div className="rounded-2xl border border-dashed border-slate-300 p-6 flex flex-col items-center justify-center text-center opacity-40">
-            <div className="h-10 w-10 rounded-full border border-slate-200 flex items-center justify-center mb-3">
-              <LinkIcon className="h-4 w-4 text-slate-400" />
-            </div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">External Logs Integration</p>
-            <p className="text-[9px] text-slate-400 mt-1">AWS Cloudwatch Sync Pending</p>
-          </div>
         </aside>
       </div>
 
@@ -880,17 +1155,46 @@ export default function AdvocateGrievancesPage() {
 
                 {/* Tags Action */}
                 <div className="flex flex-1 flex-wrap items-center gap-3 px-2">
-                  <div className="flex items-center gap-1.5 min-w-[140px]">
+                  <div className="flex min-w-[220px] flex-col gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {bulkTags.map((tag) => (
+                        <span key={tag} className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-300">
+                          #{tag}
+                          <button
+                            type="button"
+                            onClick={() => setBulkTags((prev) => prev.filter((entry) => entry !== tag))}
+                            className="text-blue-200 hover:text-white"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
                     <TagIcon className="h-3 w-3 text-slate-500" />
                     <input
                       className="w-full bg-transparent text-[12px] font-medium text-white placeholder:text-slate-600 focus:outline-none"
                       placeholder="Enter bulk labels..."
-                      value={bulkTagsInput}
-                      onChange={(e) => setBulkTagsInput(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && assignTagsToSelected()}
+                      value={bulkTagInput}
+                      onChange={(e) => setBulkTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault();
+                        addBulkTag(bulkTagInput);
+                        setBulkTagInput('');
+                      }}
                     />
                   </div>
+                  </div>
                   <div className="h-6 w-px bg-white/10 hidden md:block" />
+
+                  <button
+                    type="button"
+                    className="rounded-lg border border-blue-400/30 bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-200 hover:bg-blue-500/20"
+                    onClick={() => void assignTagsToSelected()}
+                  >
+                    Apply Tags
+                  </button>
 
                   {/* Status Group */}
                   <div className="flex items-center gap-2">
@@ -920,28 +1224,40 @@ export default function AdvocateGrievancesPage() {
                   <div className="flex flex-1 items-center gap-2">
                     <div className="hidden lg:flex flex-1 items-center gap-2 bg-white/5 rounded-xl px-3 py-1.5 focus-within:bg-white/10 transition-colors">
                       <Layers className="h-3 w-3 text-slate-500" />
-                      <input
-                        className="w-full bg-transparent text-[11px] font-medium text-white placeholder:text-slate-600 focus:outline-none"
-                        placeholder="Cluster Title..."
-                        value={clusterName}
-                        onChange={(e) => setClusterName(e.target.value)}
-                      />
+                      <select
+                        className="w-full bg-transparent text-[11px] font-medium text-white focus:outline-none"
+                        value={targetClusterId}
+                        onChange={(e) => setTargetClusterId(e.target.value)}
+                      >
+                        <option value="">Systemic Issue Cluster</option>
+                        {clusters.map((cluster) => (
+                          <option key={cluster.id} value={cluster.id} className="text-slate-900">
+                            {cluster.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <button
                       type="button"
                       className="group flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-[11px] font-black text-white hover:bg-blue-500 shadow-lg shadow-blue-600/20 disabled:opacity-40 transition-all active:scale-95"
-                      onClick={() => void createClusterFromSelected()}
-                      disabled={actionBusy || !clusterName}
+                      onClick={() => {
+                        if (targetClusterId) {
+                          void addComplaintsToCluster(targetClusterId, selectedIds);
+                          return;
+                        }
+                        void createClusterFromSelected();
+                      }}
+                      disabled={actionBusy}
                     >
                       <Layers className="h-3.5 w-3.5" />
-                      INIT CLUSTER
+                      SAVE IN CLUSTER
                     </button>
 
                     <button
                       type="button"
                       className="group flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-slate-400 hover:bg-white/5 transition-all disabled:opacity-30"
                       onClick={() => void addToExistingCluster()}
-                      disabled={actionBusy || !existingClusterId}
+                      disabled={actionBusy || !targetClusterId}
                       title="Merge into Focus Cluster"
                     >
                       <LinkIcon className="h-4 w-4" />
@@ -952,6 +1268,56 @@ export default function AdvocateGrievancesPage() {
             </div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {mounted && showClusterModal
+          ? createPortal(
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/70 p-4"
+            >
+              <motion.div
+                initial={{ y: 12, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 12, opacity: 0 }}
+                className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+              >
+                <h3 className="text-lg font-bold text-slate-900">Create New Cluster</h3>
+                <p className="mt-1 text-sm text-slate-500">Name your cluster and save selected complaints.</p>
+                <input
+                  className="mt-4 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Cluster name"
+                  value={clusterModalName}
+                  onChange={(e) => setClusterModalName(e.target.value)}
+                />
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                    onClick={() => {
+                      setShowClusterModal(false);
+                      setClusterModalName('');
+                      setClusterModalComplaintIds([]);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white"
+                    onClick={() => void saveClusterModal()}
+                  >
+                    Save
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>,
+            document.body,
+          )
+          : null}
       </AnimatePresence>
     </div>
   );

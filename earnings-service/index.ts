@@ -251,8 +251,7 @@ app.get('/shifts', async (req, res) => {
       SELECT sc.file_url
       FROM earnings.shift_screenshots sc
       WHERE sc.shift_id = s.id
-        AND sc.is_primary = TRUE
-      ORDER BY sc.uploaded_at DESC
+      ORDER BY sc.is_primary DESC, sc.uploaded_at DESC
       LIMIT 1
     ) ss ON TRUE
     WHERE ${where.join(' AND ')}
@@ -567,10 +566,18 @@ app.get('/verifier/queue', async (req, res) => {
       s.platform_deductions,
       s.net_received,
       s.deduction_rate,
-      s.screenshot_url,
+      COALESCE(ss.file_url, s.screenshot_url) AS screenshot_url,
+      ss.file_url AS file_url,
       s.created_at AS submitted_at
     FROM earnings.shifts s
     JOIN auth.users u ON u.id = s.worker_id
+    LEFT JOIN LATERAL (
+      SELECT sc.file_url
+      FROM earnings.shift_screenshots sc
+      WHERE sc.shift_id = s.id
+      ORDER BY sc.is_primary DESC, sc.uploaded_at DESC
+      LIMIT 1
+    ) ss ON TRUE
     WHERE s.verification_status = 'pending'
       AND s.deleted_at IS NULL
       AND u.deleted_at IS NULL

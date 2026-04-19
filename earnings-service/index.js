@@ -334,9 +334,29 @@ app.get('/verifier/queue', async (req, res) => {
   try {
     await requireRole(req, ['verifier']);
     const result = await pool.query(
-      `SELECT s.*, u.name as worker_name
+      `SELECT
+        s.id,
+        s.worker_id,
+        s.platform,
+        s.shift_date,
+        s.hours_worked,
+        s.gross_earned,
+        s.platform_deductions,
+        s.net_received,
+        s.verification_status,
+        s.created_at,
+        u.name as worker_name,
+        COALESCE(ss.file_url, s.screenshot_url) AS screenshot_url,
+        ss.file_url AS file_url
        FROM earnings.shifts s
        JOIN auth.users u ON u.id = s.worker_id
+       LEFT JOIN LATERAL (
+         SELECT sc.file_url
+         FROM earnings.shift_screenshots sc
+         WHERE sc.shift_id = s.id
+         ORDER BY sc.is_primary DESC, sc.uploaded_at DESC
+         LIMIT 1
+       ) ss ON TRUE
        WHERE s.verification_status = 'pending'
        ORDER BY s.created_at ASC`,
     );

@@ -10,5 +10,9 @@ export default function LegacyQueueRoute() {
 		router.replace('/verifier/queue');
 	}, [router]);
 
-	return <main className="p-6 text-sm text-slate-500">Redirecting to verifier queue…</main>;
+	return (
+		<div className="fixed inset-0 z-[210] flex items-center justify-center bg-white/35 backdrop-blur-sm">
+			<div className="h-10 w-10 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+		</div>
+	);
 }

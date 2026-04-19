@@ -19,7 +19,6 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const router = useRouter();
   const isPublic = publicRoutes.includes(pathname);
-  const usesDedicatedLayout = pathname.startsWith('/verifier');
   const [ready, setReady] = useState(isPublic);
   const [pageLoading, setPageLoading] = useState(true);
 
@@ -30,7 +29,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
   }, [pathname]);
 
   useEffect(() => {
-    if (isPublic || usesDedicatedLayout) {
+    if (isPublic) {
       setReady(true);
       return;
     }
@@ -53,13 +52,17 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
       router.replace(role === 'advocate' ? '/advocate/analytics' : '/dashboard');
       return;
     }
+    if (pathname.startsWith('/verifier') && role !== 'verifier') {
+      router.replace(role === 'advocate' ? '/advocate/analytics' : '/dashboard');
+      return;
+    }
     if (
       (pathname.startsWith('/dashboard') ||
         pathname.startsWith('/shifts') ||
         pathname.startsWith('/certificate')) &&
       role === 'verifier'
     ) {
-      router.replace('/queue');
+      router.replace('/verifier/queue');
       return;
     }
     if (
@@ -73,37 +76,13 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     }
 
     setReady(true);
-  }, [isPublic, pathname, usesDedicatedLayout]);
+  }, [isPublic, pathname]);
 
   if (!isPublic && !ready) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-500">
-        Loading…
-      </div>
-    );
+    return <FullPageLoader />;
   }
 
   if (isPublic) {
-    return (
-      <>
-        {pageLoading ? <FullPageLoader /> : null}
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.main
-            key={pathname}
-            className="min-h-screen"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-          >
-            {children}
-          </motion.main>
-        </AnimatePresence>
-      </>
-    );
-  }
-
-  if (usesDedicatedLayout) {
     return (
       <>
         {pageLoading ? <FullPageLoader /> : null}

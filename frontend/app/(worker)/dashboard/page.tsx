@@ -495,6 +495,11 @@ export default function WorkerDashboardPage() {
     return {
       tooltip: {
         trigger: 'axis',
+        confine: true,
+        borderColor: '#1e293b',
+        backgroundColor: '#020617',
+        textStyle: { color: '#e2e8f0' },
+        extraCssText: 'max-width:320px; white-space:normal; word-break:break-word; border-radius:12px; box-shadow:0 12px 30px rgba(2,6,23,0.45);',
         formatter: (params: any) => {
           const p = params[0];
           let html = `<b>${p.name}</b><br/>Earnings: PKR ${Number(p.value || 0).toFixed(2)}`;
@@ -505,6 +510,7 @@ export default function WorkerDashboardPage() {
               html += `- ${a.type} (${a.severity})<br/>`;
             });
           }
+          html += '</div>';
           return html;
         }
       },
@@ -803,15 +809,15 @@ export default function WorkerDashboardPage() {
             {monthSummary.hourlyGrowth >= 0 ? '+' : ''}{monthSummary.hourlyGrowth.toFixed(1)}% vs previous month
           </p>
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Top Earning Platform</p>
-          <p className="mt-2 text-3xl font-bold text-white">{topPlatform.name}</p>
-          <p className="mt-2 text-xs font-semibold text-sky-300">PKR {Math.round(topPlatform.value).toLocaleString()} earned</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{topPlatform.name}</p>
+          <p className="mt-2 text-xs font-semibold text-sky-600">PKR {Math.round(topPlatform.value).toLocaleString()} earned</p>
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Complaints</p>
-          <p className="mt-2 text-3xl font-bold text-white">{complaints.filter((c) => c.status !== 'resolved').length}</p>
-          <p className="mt-2 text-xs font-semibold text-slate-300">Open cases currently in pipeline</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{complaints.filter((c) => c.status !== 'resolved').length}</p>
+          <p className="mt-2 text-xs font-semibold text-slate-500">Open cases currently in pipeline</p>
         </div>
 
         {/* ROW 2: CHARTS */}
@@ -819,7 +825,7 @@ export default function WorkerDashboardPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-white">Performance (Earnings & Alerts)</h2>
-              <p className="text-xs text-slate-400">Red markers show anomaly dates.</p>
+              <p className="text-xs text-slate-300">Red markers show anomaly dates with full descriptions in tooltip.</p>
             </div>
             <PeriodSelect value={performancePeriod} onChange={setPerformancePeriod} dark />
           </div>
@@ -827,7 +833,7 @@ export default function WorkerDashboardPage() {
             {performanceShifts.length > 0 ? (
               <ReactECharts option={performanceOption} style={{ height: '100%', width: '100%' }} />
             ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">No performance data in selected range.</div>
+              <div className="flex h-full items-center justify-center text-sm text-slate-300">No performance data in selected range.</div>
             )}
           </div>
         </div>
@@ -880,27 +886,27 @@ export default function WorkerDashboardPage() {
           </div>
         </div>
 
-        <div className="col-span-12 md:col-span-6 lg:col-span-6 rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-sm">
+        <div className="col-span-12 md:col-span-6 lg:col-span-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-bold text-white">Platform Commission Rate Tracker</h2>
+            <h2 className="text-base font-bold text-slate-900">Platform Commission Rate Tracker</h2>
             <div className="flex items-center gap-2">
               <select
                 value={commissionPlatform}
                 onChange={(e) => setCommissionPlatform(e.target.value)}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-slate-200 outline-none"
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none"
               >
                 {platformOptions.map((p) => (
                   <option key={`commission-${p}`} value={p}>{p === 'all' ? 'All Platforms' : p.toUpperCase()}</option>
                 ))}
               </select>
-              <PeriodSelect value={commissionPeriod} onChange={setCommissionPeriod} dark />
+              <PeriodSelect value={commissionPeriod} onChange={setCommissionPeriod} />
             </div>
           </div>
           <div className="h-64">
             {commissionPlatformShifts.length > 0 ? (
               <ReactECharts option={commissionTrackerOption} style={{ height: '100%', width: '100%' }} />
             ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">No commission data yet.</div>
+              <div className="flex h-full items-center justify-center text-sm text-slate-500">No commission trend data yet.</div>
             )}
           </div>
         </div>

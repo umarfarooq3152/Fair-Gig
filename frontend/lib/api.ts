@@ -1,9 +1,9 @@
 export const API_BASE = {
-  auth: process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'http://localhost:8001',
-  earnings: process.env.NEXT_PUBLIC_EARNINGS_SERVICE_URL || 'http://localhost:8002',
-  anomaly: process.env.NEXT_PUBLIC_ANOMALY_SERVICE_URL || 'http://localhost:8003',
-  grievance: process.env.NEXT_PUBLIC_GRIEVANCE_SERVICE_URL || 'http://localhost:8004',
-  analytics: process.env.NEXT_PUBLIC_ANALYTICS_SERVICE_URL || 'http://localhost:8005',
+  auth: process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || '/api/authsvc',
+  earnings: process.env.NEXT_PUBLIC_EARNINGS_SERVICE_URL || '/api/earningssvc',
+  anomaly: process.env.NEXT_PUBLIC_ANOMALY_SERVICE_URL || '/api/anomalysvc',
+  grievance: process.env.NEXT_PUBLIC_GRIEVANCE_SERVICE_URL || '/api/grievancesvc',
+  analytics: process.env.NEXT_PUBLIC_ANALYTICS_SERVICE_URL || '/api/analyticssvc',
 };
 
 export function getToken() {
