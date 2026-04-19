@@ -1,27 +1,22 @@
-# Grievance Service
+# Grievance Service (Port 8004)
 
-Node.js + TypeScript service for complaint posting, tagging, clustering, and advocate moderation.
+The Grievance Service powers the public issue reporting and the advocate tracking pipelines.
 
-Install command:
-`npm install express pg cors dotenv jose` (+ `tsx` / `typescript` for TypeScript)
+## Tech Stack
+**Node.js (Express) + TypeScript**. Employs PostgreSQL robust array operations and semantic grouping to bucket complaints.
 
-Start command (from **repo root**):
-`npx tsx grievance-service/index.ts`
+## How to run
+```bash
+# From this directory
+npm install
+npm run dev
+```
 
-Environment variables:
-- `DATABASE_URL`
-- `JWT_SECRET` (required — same as auth-service)
-
-Primary endpoints (details in `API_CONTRACTS.md`):
+## API Contracts
+See the root `/API_CONTRACTS.md` for full parameter definitions.
+- `GET /api/complaints/public`
+- `POST /api/complaints`
+- `GET /api/complaints/advocate/feed`
+- `PUT /api/complaints/:id/moderate`
+- `GET /api/complaints/board/tag-clusters`
 - `GET /health`
-- `GET /api/complaints/public` — Public grievance board
-- `POST /api/complaints` — Worker creates complaint (Bearer required)
-- `GET /api/complaints/advocate/feed` — Advocate moderation queue (cursor pagination)
-- `PUT /api/complaints/:id/moderate` — Advocate updates tags / category / notes
-- `GET /api/complaints/:id` — Single complaint
-- `GET /api/complaints/board/tag-clusters` — GROUP BY tag + platform with `complaint_ids` arrays
-
-Legacy aliases:
-- `GET /complaints` → public feed
-- `POST /complaints` → `POST /api/complaints`
-- `GET /complaints/clusters` → `{ clusters: [...] }`

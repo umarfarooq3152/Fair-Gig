@@ -1,26 +1,32 @@
-# Auth Service
+# Auth Service (Port 8001)
 
-JWT auth and role management for worker, verifier, and advocate accounts.
+The Auth Service manages user registrations, login sessions, and Role-Based Access Control (RBAC) via JWTs for all internal systems (Worker, Verifier, Advocate).
 
-Install command:
-`pip install fastapi uvicorn python-jose[cryptography] passlib[bcrypt] psycopg2-binary python-dotenv`
+## Tech Stack
+Available in both **Node.js (Express)** AND **Python (FastAPI)**.
 
-Start command:
-`uvicorn main:app --port 8001 --reload`
-
-Environment variables:
-- `DATABASE_URL`
-- `JWT_SECRET` (required — no default; must match earnings + grievance services)
-
-Endpoints:
-- `GET /health` — Liveness
-- `POST /auth/register` — Register worker/verifier/advocate
-- `POST /auth/login` — Returns `{ access_token, refresh_token, token_type, user }`
-- `POST /auth/refresh` — Refresh JWT pair
-- `GET /auth/me` — Return current user profile from Bearer token
-
-Sample login:
+## How to run (FastAPI Version - Competition Default)
 ```bash
-curl -s -X POST http://localhost:8001/auth/login -H "Content-Type: application/json" \
-  -d "{\"email\":\"worker1@fairgig.demo\",\"password\":\"password\"}"
+# From this directory
+python -m venv venv
+venv\Scripts\activate  # Windows
+# or: source venv/bin/activate # Mac/Linux
+
+pip install -r requirements.txt
+uvicorn main:app --port 8001 --reload
 ```
+
+## How to run (Node.js Version)
+```bash
+# From this directory
+npm install
+npm run dev
+```
+
+## API Contracts
+See the root `/API_CONTRACTS.md` for full parameter definitions.
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `GET /auth/me`
+- `GET /health`

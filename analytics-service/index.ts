@@ -159,6 +159,28 @@ app.get('/analytics/commission-snapshots', async (req, res) => {
   res.json(result.rows);
 });
 
+// ---------------------------------------------------------------------------
+// GET /analytics/collective-count — count of workers reporting same anomaly
+// ---------------------------------------------------------------------------
+app.get('/analytics/collective-count', async (req, res) => {
+  const { platform, anomaly_type, month } = req.query;
+
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(DISTINCT worker_id)::int AS count
+       FROM analytics.anomaly_logs
+       WHERE platform = $1
+         AND anomaly_type::TEXT = $2
+         AND affected_date LIKE $3`,
+      [platform, anomaly_type, month + '%']
+    );
+    res.json({ count: Number(result.rows[0]?.count || 0) });
+  } catch (err: any) {
+    console.error('Collective count error:', err.message);
+    res.json({ count: 0 });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Analytics Service running on port ${PORT}`);
 });

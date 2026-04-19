@@ -93,6 +93,8 @@ app.get('/verify/:id', (req, res) => {
   `);
 });
 
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'certificate-renderer' }));
+
 app.listen(PORT, () => {
     console.log(`Certificate Renderer Service is running on http://localhost:${PORT}`);
 });
